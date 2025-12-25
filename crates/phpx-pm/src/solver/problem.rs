@@ -115,7 +115,7 @@ fn describe_rule(pool: &Pool, rule: &ProblemRule) -> String {
             let target = rule.target.as_deref().unwrap_or("unknown");
             format!("{} conflicts with {}", source, target)
         }
-        RuleType::PackageSameName => {
+        RuleType::PackageSameName | RuleType::MultiConflict => {
             "Only one version of a package can be installed".to_string()
         }
         RuleType::PackageAlias | RuleType::PackageInverseAlias => {

@@ -1,16 +1,5 @@
-use std::collections::HashMap;
-
 use super::rule::Literal;
 use super::pool::PackageId;
-
-/// A single decision record
-#[derive(Debug, Clone, Copy)]
-struct Decision {
-    /// Whether the package is installed (true) or not (false)
-    installed: bool,
-    /// The decision level at which this was decided
-    level: u32,
-}
 
 /// Tracks decisions made during SAT solving.
 ///
@@ -18,10 +7,14 @@ struct Decision {
 /// - Whether a package is installed (+) or not installed (-)
 /// - At what decision level it was decided
 /// - Which rule caused the decision
+///
+/// Uses a flat Vec indexed by PackageId for O(1) lookups (like Composer).
+/// The decision_map stores: 0 = undecided, >0 = installed at level N, <0 = not installed at level -N
 #[derive(Debug)]
 pub struct Decisions {
-    /// Maps package ID to decision
-    decision_map: HashMap<PackageId, Decision>,
+    /// Maps package ID to decision: 0 = undecided, >0 = installed at level, <0 = not installed at level
+    /// Index is PackageId, value encodes both decision and level
+    decision_map: Vec<i32>,
 
     /// Queue of decisions in order made [(literal, rule_id)]
     decision_queue: Vec<(Literal, Option<u32>)>,
@@ -34,23 +27,44 @@ impl Decisions {
     /// Create a new empty decisions tracker
     pub fn new() -> Self {
         Self {
-            decision_map: HashMap::new(),
+            decision_map: Vec::new(),
             decision_queue: Vec::new(),
             level: 0,
         }
     }
 
+    /// Create a new decisions tracker with pre-allocated capacity
+    pub fn with_capacity(max_package_id: usize) -> Self {
+        Self {
+            decision_map: vec![0; max_package_id + 1],
+            decision_queue: Vec::with_capacity(max_package_id),
+            level: 0,
+        }
+    }
+
+    /// Ensure the decision map can hold a package ID
+    #[inline]
+    fn ensure_capacity(&mut self, package_id: PackageId) {
+        let id = package_id as usize;
+        if id >= self.decision_map.len() {
+            self.decision_map.resize(id + 1, 0);
+        }
+    }
+
     /// Get the current decision level
+    #[inline]
     pub fn level(&self) -> u32 {
         self.level
     }
 
     /// Increment the decision level
+    #[inline]
     pub fn increment_level(&mut self) {
         self.level += 1;
     }
 
     /// Set the decision level
+    #[inline]
     pub fn set_level(&mut self, level: u32) {
         self.level = level;
     }
@@ -60,81 +74,121 @@ impl Decisions {
     /// Returns false if this conflicts with an existing decision
     pub fn decide(&mut self, literal: Literal, rule_id: Option<u32>) -> bool {
         let package_id = literal.unsigned_abs() as PackageId;
-        let install = literal > 0;
+        self.ensure_capacity(package_id);
 
-        // Check for conflict
-        if let Some(existing) = self.decision_map.get(&package_id) {
-            if existing.installed != install {
+        let id = package_id as usize;
+        let existing = self.decision_map[id];
+
+        if existing != 0 {
+            // Already decided
+            let was_installed = existing > 0;
+            let want_installed = literal > 0;
+            if was_installed != want_installed {
                 return false; // Conflict
             }
             return true; // Already decided the same way
         }
 
-        // Record decision
-        self.decision_map.insert(package_id, Decision {
-            installed: install,
-            level: self.level,
-        });
+        // Record decision: positive means installed, negative means not installed
+        // Store level+1 so that level 0 doesn't become 0 (which means undecided)
+        let level_value = (self.level + 1) as i32;
+        self.decision_map[id] = if literal > 0 { level_value } else { -level_value };
         self.decision_queue.push((literal, rule_id));
 
         true
     }
 
     /// Check if a literal is satisfied by current decisions
+    #[inline]
     pub fn satisfied(&self, literal: Literal) -> bool {
         let package_id = literal.unsigned_abs() as PackageId;
-        let want_installed = literal > 0;
+        let id = package_id as usize;
 
-        if let Some(decision) = self.decision_map.get(&package_id) {
-            decision.installed == want_installed
-        } else {
-            false
+        if id >= self.decision_map.len() {
+            return false;
         }
+
+        let decision = self.decision_map[id];
+        if decision == 0 {
+            return false;
+        }
+
+        let is_installed = decision > 0;
+        let want_installed = literal > 0;
+        is_installed == want_installed
     }
 
     /// Check if a literal conflicts with current decisions
+    #[inline]
     pub fn conflict(&self, literal: Literal) -> bool {
         let package_id = literal.unsigned_abs() as PackageId;
-        let want_installed = literal > 0;
+        let id = package_id as usize;
 
-        if let Some(decision) = self.decision_map.get(&package_id) {
-            decision.installed != want_installed
-        } else {
-            false
+        if id >= self.decision_map.len() {
+            return false;
         }
+
+        let decision = self.decision_map[id];
+        if decision == 0 {
+            return false;
+        }
+
+        let is_installed = decision > 0;
+        let want_installed = literal > 0;
+        is_installed != want_installed
     }
 
     /// Check if a package has been decided (either way)
+    #[inline]
     pub fn decided(&self, package_id: PackageId) -> bool {
-        self.decision_map.contains_key(&package_id)
+        let id = package_id as usize;
+        id < self.decision_map.len() && self.decision_map[id] != 0
     }
 
     /// Check if a package is undecided
+    #[inline]
     pub fn undecided(&self, package_id: PackageId) -> bool {
         !self.decided(package_id)
     }
 
     /// Check if a package was decided to be installed
+    #[inline]
     pub fn decided_install(&self, package_id: PackageId) -> bool {
-        self.decision_map.get(&package_id).map(|d| d.installed).unwrap_or(false)
+        let id = package_id as usize;
+        id < self.decision_map.len() && self.decision_map[id] > 0
     }
 
     /// Check if a package was decided to not be installed
+    #[inline]
     pub fn decided_remove(&self, package_id: PackageId) -> bool {
-        self.decision_map.get(&package_id).map(|d| !d.installed).unwrap_or(false)
+        let id = package_id as usize;
+        id < self.decision_map.len() && self.decision_map[id] < 0
     }
 
     /// Get the decision level for a literal/package
+    #[inline]
     pub fn decision_level(&self, literal: Literal) -> Option<u32> {
         let package_id = literal.unsigned_abs() as PackageId;
-        self.decision_map.get(&package_id).map(|d| d.level)
+        let id = package_id as usize;
+
+        if id >= self.decision_map.len() {
+            return None;
+        }
+
+        let decision = self.decision_map[id];
+        if decision == 0 {
+            None
+        } else {
+            // Subtract 1 to get back the original level (we stored level+1)
+            Some(decision.unsigned_abs() - 1)
+        }
     }
 
     /// Get the rule that caused a decision
     pub fn decision_rule(&self, literal: Literal) -> Option<u32> {
         let package_id = literal.unsigned_abs() as PackageId;
 
-        // Find in queue
+        // Find in queue (could be optimized with a separate map if needed)
         for &(lit, rule_id) in &self.decision_queue {
             if lit.unsigned_abs() as PackageId == package_id {
                 return rule_id;
@@ -145,15 +199,21 @@ impl Decisions {
 
     /// Revert all decisions at levels > target_level
     pub fn revert_to_level(&mut self, target_level: u32) {
-        // Remove decisions from map
-        self.decision_map.retain(|_, decision| {
-            decision.level <= target_level
-        });
+        // We store level+1, so target comparison needs +1 as well
+        let target = (target_level + 1) as i32;
 
-        // Remove from queue
+        // Clear decisions above target level
+        for decision in &mut self.decision_map {
+            if *decision != 0 && (decision.unsigned_abs() as i32) > target {
+                *decision = 0;
+            }
+        }
+
+        // Remove from queue - check directly against the map
+        let decision_map = &self.decision_map;
         self.decision_queue.retain(|(literal, _)| {
-            let package_id = literal.unsigned_abs() as PackageId;
-            self.decision_map.contains_key(&package_id)
+            let id = literal.unsigned_abs() as usize;
+            id < decision_map.len() && decision_map[id] != 0
         });
 
         self.level = target_level;
@@ -163,8 +223,9 @@ impl Decisions {
     pub fn installed_packages(&self) -> impl Iterator<Item = PackageId> + '_ {
         self.decision_map
             .iter()
-            .filter(|(_, d)| d.installed)
-            .map(|(&id, _)| id)
+            .enumerate()
+            .filter(|(_, &d)| d > 0)
+            .map(|(id, _)| id as PackageId)
     }
 
     /// Get the decision queue
@@ -198,7 +259,7 @@ impl Decisions {
 
     /// Reset all decisions
     pub fn reset(&mut self) {
-        self.decision_map.clear();
+        self.decision_map.fill(0);
         self.decision_queue.clear();
         self.level = 0;
     }
@@ -207,8 +268,11 @@ impl Decisions {
     pub fn snapshot(&self) -> Vec<(PackageId, bool, u32)> {
         self.decision_map
             .iter()
-            .map(|(&id, decision)| {
-                (id, decision.installed, decision.level)
+            .enumerate()
+            .filter(|(_, &d)| d != 0)
+            .map(|(id, &d)| {
+                // Subtract 1 to get original level (we stored level+1)
+                (id as PackageId, d > 0, d.unsigned_abs() - 1)
             })
             .collect()
     }

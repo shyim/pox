@@ -54,6 +54,26 @@ impl WatchGraph {
         }
 
         let rule_id = rule.id();
+
+        // Multi-conflict rules watch ALL their literals for efficiency
+        // When any literal becomes true (package installed), it immediately triggers a check
+        if rule.is_multi_conflict() {
+            // For multi-conflict, we watch all literals
+            // Each watch node points to the first literal as "other" (just for the struct)
+            let first = literals[0];
+            for &lit in literals {
+                self.watches
+                    .entry(lit)
+                    .or_default()
+                    .push(WatchNode {
+                        rule_id,
+                        other_watch: first, // Placeholder, multi-conflict handles this specially
+                    });
+            }
+            return;
+        }
+
+        // Standard 2-watched-literal scheme
         let watch1 = literals[0];
         let watch2 = literals[1];
 
@@ -161,6 +181,19 @@ impl<'a> Propagator<'a> {
                 continue;
             }
 
+            // Multi-conflict rules are handled differently
+            // They watch all literals and trigger when a package is INSTALLED (literal becomes true)
+            // For multi-conflict: literals are [-A, -B, -C, ...] meaning "not all of A,B,C can be installed"
+            // When we decide +A (install A), the literal -A becomes false, and we need to propagate
+            // that all other packages in the conflict must NOT be installed
+            if rule.is_multi_conflict() {
+                let result = self.propagate_multi_conflict(rule, false_literal, &mut is_satisfied);
+                if result != PropagateResult::Ok {
+                    results.push(result);
+                }
+                continue;
+            }
+
             let other = watch.other_watch;
 
             // Check if other watched literal satisfies the rule
@@ -187,6 +220,51 @@ impl<'a> Propagator<'a> {
         }
 
         results
+    }
+
+    /// Propagate a multi-conflict rule.
+    ///
+    /// Multi-conflict rules represent "at most one of these packages can be installed".
+    /// When one package is installed (making its negative literal false), all other
+    /// packages must NOT be installed.
+    fn propagate_multi_conflict<F>(
+        &mut self,
+        rule: &Rule,
+        false_literal: Literal,
+        is_satisfied: &mut F,
+    ) -> PropagateResult
+    where
+        F: FnMut(Literal) -> Option<bool>,
+    {
+        let literals = rule.literals();
+
+        // false_literal is the one that just became false (meaning a package was installed)
+        // All other literals in the rule must now be true (packages not installed)
+        // Or there's a conflict if any other is already false (another package also installed)
+
+        for &lit in literals {
+            if lit == false_literal {
+                continue;
+            }
+
+            match is_satisfied(lit) {
+                Some(true) => {
+                    // This literal is already satisfied (package not installed), good
+                    continue;
+                }
+                Some(false) => {
+                    // Another package is also installed - conflict!
+                    return PropagateResult::Conflict(rule.id());
+                }
+                None => {
+                    // Undecided - must propagate that this package cannot be installed
+                    // The literal is negative (-pkg), so to satisfy it, the package must not be installed
+                    return PropagateResult::Unit(lit, rule.id());
+                }
+            }
+        }
+
+        PropagateResult::Ok
     }
 
     /// Try to find a new literal to watch

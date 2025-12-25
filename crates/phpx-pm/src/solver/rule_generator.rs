@@ -288,26 +288,26 @@ impl<'a> RuleGenerator<'a> {
             return;
         }
 
-        // Generate pairwise conflict rules for all versions
-        // For efficiency with many versions, we generate (n choose 2) rules
-        for i in 0..versions.len() {
-            for j in (i + 1)..versions.len() {
-                let id_a = versions[i];
-                let id_b = versions[j];
-
-                // Skip conflict between an alias and its base package
-                // An alias is just a different version view of the same package,
-                // so they MUST coexist - installing an alias means installing the base.
-                if self.pool.get_alias_base(id_a) == Some(id_b)
-                    || self.pool.get_alias_base(id_b) == Some(id_a)
-                {
-                    continue;
+        // Filter out alias-base pairs (they must coexist)
+        let mut non_alias_versions: Vec<PackageId> = Vec::new();
+        for id in &versions {
+            // Skip if this is an alias of another version in the list
+            if let Some(base_id) = self.pool.get_alias_base(*id) {
+                if versions.contains(&base_id) {
+                    continue; // Skip alias, keep only base
                 }
-
-                let rule = Rule::conflict(vec![id_a, id_b]);
-                self.rules.add(rule);
             }
+            non_alias_versions.push(*id);
         }
+
+        if non_alias_versions.len() <= 1 {
+            return;
+        }
+
+        // Use a single multi-conflict rule instead of O(n²) pairwise conflicts
+        // This is much more efficient for packages with many versions
+        let rule = Rule::multi_conflict(non_alias_versions);
+        self.rules.add(rule);
     }
 
     /// Add conflict rules for packages that conflict with each other
@@ -478,9 +478,9 @@ mod tests {
         let generator = RuleGenerator::new(&pool);
         let rules = generator.generate(&request);
 
-        // Should have same-name conflict rules for vendor/a versions
-        let conflict_rules: Vec<_> = rules.rules_of_type(RuleType::PackageConflict).collect();
-        assert!(!conflict_rules.is_empty());
+        // Should have multi-conflict rules for vendor/a versions (only one version allowed)
+        let multi_conflict_rules: Vec<_> = rules.rules_of_type(RuleType::MultiConflict).collect();
+        assert!(!multi_conflict_rules.is_empty());
     }
 
     #[test]

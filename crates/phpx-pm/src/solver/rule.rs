@@ -17,8 +17,11 @@ pub enum RuleType {
     PackageRequires,
     /// Package conflict: A and B cannot both be installed
     PackageConflict,
-    /// Multiple versions of same package: only one can be installed
+    /// Multiple versions of same package: only one can be installed (binary conflict)
     PackageSameName,
+    /// Multiple versions of same package: at most one can be installed (n-ary multi-conflict)
+    /// This is more efficient than O(n²) binary conflicts for packages with many versions
+    MultiConflict,
     /// Alias must require its target
     PackageAlias,
     /// Target must require its alias
@@ -35,10 +38,16 @@ impl RuleType {
             RuleType::PackageRequires
             | RuleType::PackageConflict
             | RuleType::PackageSameName
+            | RuleType::MultiConflict
             | RuleType::PackageAlias
             | RuleType::PackageInverseAlias => 0, // Package rules
             RuleType::Learned => 4,
         }
+    }
+
+    /// Check if this is a multi-conflict rule type
+    pub fn is_multi_conflict(&self) -> bool {
+        matches!(self, RuleType::MultiConflict)
     }
 }
 
@@ -103,10 +112,23 @@ impl Rule {
         Self::new(literals, RuleType::PackageConflict)
     }
 
-    /// Create a same-name rule: only one of these versions can be installed
+    /// Create a same-name rule: only one of these versions can be installed (binary conflict)
     pub fn same_name(packages: Vec<PackageId>) -> Self {
         let literals: Vec<_> = packages.into_iter().map(|p| -p).collect();
         Self::new(literals, RuleType::PackageSameName)
+    }
+
+    /// Create a multi-conflict rule: at most one of these packages can be installed
+    /// This is more efficient than O(n²) binary conflicts for packages with many versions.
+    /// The rule watches all literals and triggers when any becomes true.
+    pub fn multi_conflict(packages: Vec<PackageId>) -> Self {
+        let literals: Vec<_> = packages.into_iter().map(|p| -p).collect();
+        Self::new(literals, RuleType::MultiConflict)
+    }
+
+    /// Check if this is a multi-conflict rule
+    pub fn is_multi_conflict(&self) -> bool {
+        self.rule_type.is_multi_conflict()
     }
 
     /// Create a root requirement rule
@@ -270,6 +292,7 @@ impl Rule {
             RuleType::PackageRequires => "requires",
             RuleType::PackageConflict => "conflict",
             RuleType::PackageSameName => "same-name",
+            RuleType::MultiConflict => "multi-conflict",
             RuleType::PackageAlias => "alias",
             RuleType::PackageInverseAlias => "inverse-alias",
             RuleType::Learned => "learned",
