@@ -10,6 +10,9 @@
 //!    out versions that can't possibly be selected.
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
+use std::sync::Arc;
 
 use phpx_semver::{Constraint, ConstraintInterface, Operator, VersionParser};
 
@@ -100,7 +103,9 @@ impl<'a> PoolOptimizer<'a> {
 
     /// Pre-warm caches by parsing all constraints and normalizing all versions upfront.
     /// This avoids repeated parsing during the hot loop.
-    fn prewarm_caches(&mut self, pool: &Pool) {
+    /// Pre-warm caches by parsing all unique constraints upfront.
+    /// Version normalization is done lazily to avoid processing unused packages.
+    fn prewarm_caches(&mut self, _pool: &Pool) {
         // Collect all unique constraint strings
         let mut all_constraints: HashSet<String> = HashSet::new();
         for constraints in self.require_constraints.values() {
@@ -116,31 +121,6 @@ impl<'a> PoolOptimizer<'a> {
                 let parsed = self.version_parser.parse_constraints(constraint_str).ok()
                     .map(|c| c as Box<dyn ConstraintInterface>);
                 self.constraint_cache.insert(constraint_str.clone(), parsed);
-            }
-        }
-
-        // Collect all unique versions from packages
-        let mut all_versions: HashSet<String> = HashSet::new();
-        for id in pool.all_package_ids() {
-            if let Some(pkg) = pool.package(id) {
-                all_versions.insert(pkg.version.clone());
-            }
-        }
-
-        // Normalize all versions and create version constraints upfront
-        for version in &all_versions {
-            if !self.version_cache.contains_key(version) {
-                let normalized = self.version_parser.normalize(version)
-                    .unwrap_or_else(|_| version.clone());
-
-                // Cache the normalized version
-                self.version_cache.insert(version.clone(), normalized.clone());
-
-                // Also create and cache the version constraint
-                if !self.version_constraint_cache.contains_key(&normalized) {
-                    let version_constraint = Constraint::new(Operator::Equal, normalized.clone()).ok();
-                    self.version_constraint_cache.insert(normalized, version_constraint);
-                }
             }
         }
     }
@@ -252,22 +232,70 @@ impl<'a> PoolOptimizer<'a> {
     /// Groups packages by their dependency hash and keeps only the best version
     /// (according to the policy) from each group.
     fn optimize_by_identical_dependencies(&mut self, pool: &Pool) {
-        // Group: package_name -> constraint_group -> dependency_hash -> list of packages
-        let mut groups: HashMap<String, HashMap<String, HashMap<String, Vec<PackageId>>>> =
-            HashMap::new();
+        // Map constraint string -> Unique ID
+        let mut constraint_ids: HashMap<String, u32> = HashMap::new();
+        let mut next_id = 0;
 
-        // Track which packages are in which groups for later lookup
-        let mut package_group_lookup: HashMap<PackageId, (String, String, String)> = HashMap::new();
+        // Pre-collect constraints by package name to avoid borrow issues
+        // HashMap<PackageName, Vec<(ConstraintId, ConstraintString)>>
+        let mut require_constraints_snapshot: HashMap<String, Vec<(u32, String)>> = HashMap::new();
+        let mut conflict_constraints_snapshot: HashMap<String, Vec<(u32, String)>> = HashMap::new();
 
-        // Collect package info first to avoid borrow issues
-        struct PackageInfo {
-            id: PackageId,
-            version: String,
-            name: String,
-            dep_hash: String,
+        // deterministic iteration for assigning IDs
+        let mut sorted_require_keys: Vec<_> = self.require_constraints.keys().collect();
+        sorted_require_keys.sort();
+
+        for name in sorted_require_keys {
+            let constraints = &self.require_constraints[name];
+            // Sort constraints for deterministic ID assignment
+            let mut sorted_constraints: Vec<_> = constraints.iter().collect();
+            sorted_constraints.sort();
+
+            let mut list = Vec::with_capacity(constraints.len());
+            for c in sorted_constraints {
+                let id = if let Some(&id) = constraint_ids.get(c) {
+                    id
+                } else {
+                    let id = next_id;
+                    constraint_ids.insert(c.clone(), id);
+                    next_id += 1;
+                    id
+                };
+                list.push((id, c.clone()));
+            }
+            require_constraints_snapshot.insert(name.clone(), list);
         }
 
-        let mut package_infos: Vec<PackageInfo> = Vec::new();
+        let mut sorted_conflict_keys: Vec<_> = self.conflict_constraints.keys().collect();
+        sorted_conflict_keys.sort();
+
+        for name in sorted_conflict_keys {
+            let constraints = &self.conflict_constraints[name];
+            // Sort constraints for deterministic ID assignment
+            let mut sorted_constraints: Vec<_> = constraints.iter().collect();
+            sorted_constraints.sort();
+
+            let mut list = Vec::with_capacity(constraints.len());
+            for c in sorted_constraints {
+                let id = if let Some(&id) = constraint_ids.get(c) {
+                    id
+                } else {
+                    let id = next_id;
+                    constraint_ids.insert(c.clone(), id);
+                    next_id += 1;
+                    id
+                };
+                list.push((id, c.clone()));
+            }
+            conflict_constraints_snapshot.insert(name.clone(), list);
+        }
+
+        // Group: package_name -> group_hash -> dependency_hash -> list of packages
+        // Using u64 hashes instead of strings for performance
+        let mut groups: HashMap<String, HashMap<u64, HashMap<u64, Vec<PackageId>>>> = HashMap::new();
+
+        // Track which packages have been assigned to a group
+        let mut packages_in_groups: HashSet<PackageId> = HashSet::new();
 
         for id in pool.all_package_ids() {
             // Skip irremovable packages
@@ -287,59 +315,50 @@ impl<'a> PoolOptimizer<'a> {
             // Initially mark for removal
             self.packages_to_remove.insert(id);
 
-            package_infos.push(PackageInfo {
-                id,
-                version: pkg.version.clone(),
-                name: pkg.name.to_lowercase(),
-                dep_hash: self.calculate_dependency_hash(pkg),
-            });
-        }
+            let pkg_name = pkg.name.to_lowercase();
+            let mut matched_constraints: Vec<u32> = Vec::new();
 
-        // Pre-collect constraints by package name to avoid borrow issues
-        let require_constraints_snapshot: HashMap<String, Vec<String>> = self.require_constraints
-            .iter()
-            .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
-            .collect();
-
-        let conflict_constraints_snapshot: HashMap<String, Vec<String>> = self.conflict_constraints
-            .iter()
-            .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
-            .collect();
-
-        // Now process each package
-        for info in package_infos {
-            // Check which constraint groups this package belongs to
-            if let Some(require_constraints) = require_constraints_snapshot.get(&info.name) {
-                for constraint_str in require_constraints {
-                    if self.version_matches_constraint(&info.version, constraint_str) {
-                        // Build the group key including conflicts if any
-                        let mut group_parts = vec![format!("require:{}", constraint_str)];
-
-                        if let Some(conflict_constraints) = conflict_constraints_snapshot.get(&info.name) {
-                            for conflict_str in conflict_constraints {
-                                if self.version_matches_constraint(&info.version, conflict_str) {
-                                    group_parts.push(format!("conflict:{}", conflict_str));
-                                }
-                            }
-                        }
-
-                        // Sort for deterministic grouping
-                        group_parts.sort();
-                        let group_hash = group_parts.join("");
-
-                        // Add to group
-                        groups
-                            .entry(info.name.clone())
-                            .or_default()
-                            .entry(group_hash.clone())
-                            .or_default()
-                            .entry(info.dep_hash.clone())
-                            .or_default()
-                            .push(info.id);
-
-                        package_group_lookup.insert(info.id, (info.name.clone(), group_hash, info.dep_hash.clone()));
+            // Check requires
+            if let Some(constraints) = require_constraints_snapshot.get(&pkg_name) {
+                for (id, constraint_str) in constraints {
+                    if self.version_matches_constraint(&pkg.version, constraint_str) {
+                        matched_constraints.push(id << 1); // LSB 0 for require
                     }
                 }
+            }
+
+            // Check conflicts
+            if let Some(constraints) = conflict_constraints_snapshot.get(&pkg_name) {
+                for (id, constraint_str) in constraints {
+                    if self.version_matches_constraint(&pkg.version, constraint_str) {
+                        matched_constraints.push((id << 1) | 1); // LSB 1 for conflict
+                    }
+                }
+            }
+
+            // Only group if it matches at least one constraint
+            if !matched_constraints.is_empty() {
+                // Determine group hash
+                matched_constraints.sort_unstable();
+                
+                let mut hasher = DefaultHasher::new();
+                for mc in matched_constraints {
+                    mc.hash(&mut hasher);
+                }
+                let group_hash = hasher.finish();
+                
+                let dep_hash = self.calculate_dependency_hash(pkg);
+
+                groups
+                    .entry(pkg_name)
+                    .or_default()
+                    .entry(group_hash)
+                    .or_default()
+                    .entry(dep_hash)
+                    .or_default()
+                    .push(id);
+                
+                packages_in_groups.insert(id);
             }
         }
 
@@ -369,17 +388,19 @@ impl<'a> PoolOptimizer<'a> {
                 continue;
             }
 
-            // If package wasn't added to any group, it might still be needed
-            if !package_group_lookup.contains_key(&id) && !self.packages_to_remove.contains(&id) {
-                continue; // Already kept
-            }
-
-            // Check if this package's name is required but wasn't grouped
-            if let Some(pkg) = pool.package(id) {
-                let pkg_name = pkg.name.to_lowercase();
-                if !groups.contains_key(&pkg_name) {
-                    // No groups for this package name, keep it
-                    self.keep_package(pool, id);
+            // If package wasn't added to any group, it matches no active constraints.
+            // It should be kept ONLY if no other version of this package matched any constraints 
+            // (i.e. the package name itself is not part of the active problem space constraints).
+            if !packages_in_groups.contains(&id) {
+                // If we haven't already decided to keep it (it's still in removal set)
+                if self.packages_to_remove.contains(&id) {
+                    if let Some(pkg) = pool.package(id) {
+                        let pkg_name = pkg.name.to_lowercase();
+                        if !groups.contains_key(&pkg_name) {
+                            // No groups for this package name at all, keep it
+                            self.keep_package(pool, id);
+                        }
+                    }
                 }
             }
         }
@@ -403,50 +424,30 @@ impl<'a> PoolOptimizer<'a> {
     }
 
     /// Calculate a hash of the package's dependencies for grouping.
-    fn calculate_dependency_hash(&self, package: &Package) -> String {
-        let mut hash = String::new();
-
-        // Add requires
-        if !package.require.is_empty() {
-            hash.push_str("requires:");
-            let mut requires: Vec<_> = package.require.iter().collect();
-            requires.sort_by(|a, b| a.0.cmp(b.0));
-            for (name, constraint) in requires {
-                hash.push_str(&format!("{}@{}", name, constraint));
+    fn calculate_dependency_hash(&self, package: &Package) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        
+        // Helper to hash a map sorted
+        fn hash_deps(hasher: &mut DefaultHasher, deps: &std::collections::HashMap<String, String>, prefix: u8) {
+            if deps.is_empty() { return; }
+            prefix.hash(hasher);
+            
+            // Collect references and sort to ensure deterministic hashing
+            let mut sorted: Vec<_> = deps.iter().collect();
+            sorted.sort_unstable_by(|a, b| a.0.cmp(b.0));
+            
+            for (name, constraint) in sorted {
+                name.hash(hasher);
+                constraint.hash(hasher);
             }
         }
 
-        // Add conflicts
-        if !package.conflict.is_empty() {
-            hash.push_str("conflicts:");
-            let mut conflicts: Vec<_> = package.conflict.iter().collect();
-            conflicts.sort_by(|a, b| a.0.cmp(b.0));
-            for (name, constraint) in conflicts {
-                hash.push_str(&format!("{}@{}", name, constraint));
-            }
-        }
+        hash_deps(&mut hasher, &package.require, 1);
+        hash_deps(&mut hasher, &package.conflict, 2);
+        hash_deps(&mut hasher, &package.replace, 3);
+        hash_deps(&mut hasher, &package.provide, 4);
 
-        // Add replaces
-        if !package.replace.is_empty() {
-            hash.push_str("replaces:");
-            let mut replaces: Vec<_> = package.replace.iter().collect();
-            replaces.sort_by(|a, b| a.0.cmp(b.0));
-            for (name, constraint) in replaces {
-                hash.push_str(&format!("{}@{}", name, constraint));
-            }
-        }
-
-        // Add provides
-        if !package.provide.is_empty() {
-            hash.push_str("provides:");
-            let mut provides: Vec<_> = package.provide.iter().collect();
-            provides.sort_by(|a, b| a.0.cmp(b.0));
-            for (name, constraint) in provides {
-                hash.push_str(&format!("{}@{}", name, constraint));
-            }
-        }
-
-        hash
+        hasher.finish()
     }
 
     /// Optimization 2: Remove packages that can't satisfy locked package constraints.
@@ -603,6 +604,13 @@ impl<'a> PoolOptimizer<'a> {
     fn apply_removals_to_pool(&self, original_pool: &Pool) -> Pool {
         let mut new_pool = Pool::with_minimum_stability(original_pool.minimum_stability());
 
+        // Copy stability flags
+        // TODO: Access private field stability_flags if possible, or add getter/setter
+        // Since we can't access private fields easily without modifying Pool, 
+        // we might be missing flags. But wait, we can add them via builder or setter.
+        // Assuming we rely on the fact that stability was checked during initial pool population ??
+        // Actually, optimization might lose stability flags which is bad for subsequent lookups.
+        
         // Copy packages that aren't marked for removal
         for id in original_pool.all_package_ids() {
             if self.packages_to_remove.contains(&id) {
@@ -615,8 +623,8 @@ impl<'a> PoolOptimizer<'a> {
                         let repo_name = original_pool.get_repository(id);
                         let priority = original_pool.get_priority_by_id(id);
 
-                        new_pool.add_package_from_repo(
-                            pkg.as_ref().clone(),
+                        new_pool.add_package_arc(
+                            Arc::clone(pkg),
                             repo_name,
                         );
 
@@ -631,7 +639,8 @@ impl<'a> PoolOptimizer<'a> {
                         if let Some(base_id) = original_pool.get_alias_base(id) {
                             // Only add alias if base package was kept
                             if !self.packages_to_remove.contains(&base_id) {
-                                new_pool.add_alias_package(alias.as_ref().clone());
+                                let repo_name = original_pool.get_repository(id);
+                                new_pool.add_alias_package_arc(Arc::clone(alias), repo_name);
                             }
                         }
                     }

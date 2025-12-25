@@ -212,6 +212,9 @@ impl PathRepository {
             }
         }
 
+        // Replace self.version constraints with actual version
+        pkg.replace_self_version();
+
         Some(pkg)
     }
 

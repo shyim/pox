@@ -217,31 +217,71 @@ pub async fn execute(args: UpdateArgs) -> Result<i32> {
     }
 
     // Recursively load packages and their dependencies
-    while let Some(name) = pending_packages.pop() {
-        let name_lower = name.to_lowercase();
-        if loaded_packages.contains(&name_lower) {
-            continue;
-        }
-        loaded_packages.insert(name_lower);
+    let repo_manager = Arc::new(repo_manager);
+    let mut tasks = tokio::task::JoinSet::new();
+    // Use a fixed max concurrency to avoid overloading
+    const MAX_CONCURRENT_REQUESTS: usize = 50;
 
-        spinner.set_message(format!("Loading {}...", name));
-        let packages = repo_manager.find_packages(&name).await;
-
-        // Collect new dependencies from all versions
-        for pkg in &packages {
-            for (dep_name, _) in &pkg.require {
-                if dep_name != "php" && !dep_name.starts_with("ext-") && !dep_name.starts_with("lib-") {
-                    let dep_lower = dep_name.to_lowercase();
-                    if !loaded_packages.contains(&dep_lower) {
-                        pending_packages.push(dep_name.clone());
-                    }
+    // Process loop: spawn tasks from pending queue, collect results
+    loop {
+        // 1. Spawn tasks while we have pending packages and capacity
+        while tasks.len() < MAX_CONCURRENT_REQUESTS {
+            if let Some(name) = pending_packages.pop() {
+                let name_lower = name.to_lowercase();
+                
+                // Skip if already processing or processed
+                if loaded_packages.contains(&name_lower) {
+                    continue;
                 }
+                loaded_packages.insert(name_lower);
+
+                let rm = repo_manager.clone();
+                let name_clone = name.clone();
+                
+                spinner.set_message(format!("Loading {}...", name));
+                
+                tasks.spawn(async move {
+                    (name_clone.clone(), rm.find_packages(&name_clone).await)
+                });
+            } else {
+                // No more pending packages to spawn right now
+                break;
             }
         }
 
-        // Add packages to pool
-        for pkg in packages {
-            pool.add_package((*pkg).clone());
+        // 2. If no tasks running and nothing pending, we are done
+        if tasks.is_empty() {
+             break;
+        }
+
+        // 3. Wait for the next task to complete
+        if let Some(res) = tasks.join_next().await {
+            match res {
+                Ok((_name, packages)) => {
+                    // Collect new dependencies from all versions
+                    for pkg in &packages {
+                        for (dep_name, _) in &pkg.require {
+                            if dep_name != "php" && !dep_name.starts_with("ext-") && !dep_name.starts_with("lib-") {
+                                let dep_lower = dep_name.to_lowercase();
+                                // Only add if we haven't seen it yet
+                                // Note: We might add duplicates to pending_packages here if multiple threads find the same dep,
+                                // but the check at spawn time (pop) will filter them out.
+                                if !loaded_packages.contains(&dep_lower) {
+                                    pending_packages.push(dep_name.clone());
+                                }
+                            }
+                        }
+                        
+                        // Add packages to pool
+                        // Use add_package_arc to avoid deep cloning
+                        pool.add_package_arc(pkg.clone(), None);
+                    }
+                }
+                Err(e) => {
+                    // Task panic or cancelled
+                    eprintln!("Warning: Task failed: {}", e);
+                }
+            }
         }
     }
 

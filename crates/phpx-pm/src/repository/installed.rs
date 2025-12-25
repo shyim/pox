@@ -276,6 +276,10 @@ impl Package {
         pkg.require = data.require.clone();
         pkg.require_dev = data.require_dev.clone();
         pkg.description = data.description.clone();
+
+        // Replace self.version constraints with actual version
+        pkg.replace_self_version();
+
         pkg
     }
 

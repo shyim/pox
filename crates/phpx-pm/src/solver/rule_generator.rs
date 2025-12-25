@@ -356,40 +356,11 @@ impl<'a> RuleGenerator<'a> {
                 continue;
             }
 
-            // Generate pairwise conflict rules
-            // If package A provides "foo" and package B also provides "foo",
-            // then A and B cannot both be installed
-            for i in 0..provider_ids.len() {
-                for j in (i + 1)..provider_ids.len() {
-                    let a = provider_ids[i];
-                    let b = provider_ids[j];
-
-                    // Skip if they're the same package (different versions already handled)
-                    if a == b {
-                        continue;
-                    }
-
-                    // Check if both packages have the same actual name
-                    // (already handled by same_name_rules)
-                    let same_name = if let (Some(pkg_a), Some(pkg_b)) =
-                        (self.pool.package(a), self.pool.package(b))
-                    {
-                        pkg_a.name.to_lowercase() == pkg_b.name.to_lowercase()
-                    } else {
-                        false
-                    };
-
-                    if same_name {
-                        continue;
-                    }
-
-                    // Add conflict rule: these two packages cannot both be installed
-                    // because they both provide/replace the same name
-                    let rule = Rule::conflict(vec![a, b])
-                        .with_target(name);
-                    self.rules.add(rule);
-                }
-            }
+            // Use multi-conflict rule instead of pairwise O(N^2) conflicts
+            // This forbids installing more than one package from the provider list
+            let rule = Rule::multi_conflict(provider_ids.clone())
+                .with_target(name);
+            self.rules.add(rule);
         }
     }
 }

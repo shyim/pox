@@ -407,6 +407,30 @@ impl Package {
         }
     }
 
+    /// Replace `self.version` constraints with the actual package version.
+    ///
+    /// In Composer, packages can use `self.version` as a constraint in replace,
+    /// provide, conflict, require, and require-dev to reference their own version.
+    /// This method replaces all occurrences with `=<version>`.
+    pub fn replace_self_version(&mut self) {
+        let version_constraint = format!("={}", self.version);
+
+        Self::replace_self_version_in_map(&mut self.replace, &version_constraint);
+        Self::replace_self_version_in_map(&mut self.provide, &version_constraint);
+        Self::replace_self_version_in_map(&mut self.conflict, &version_constraint);
+        Self::replace_self_version_in_map(&mut self.require, &version_constraint);
+        Self::replace_self_version_in_map(&mut self.require_dev, &version_constraint);
+    }
+
+    /// Helper to replace self.version in a constraint map
+    fn replace_self_version_in_map(map: &mut HashMap<String, String>, version_constraint: &str) {
+        for constraint in map.values_mut() {
+            if constraint == "self.version" {
+                *constraint = version_constraint.to_string();
+            }
+        }
+    }
+
     /// Returns the package name (lowercase)
     pub fn name(&self) -> &str {
         &self.name

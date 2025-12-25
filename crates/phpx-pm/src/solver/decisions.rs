@@ -16,6 +16,10 @@ pub struct Decisions {
     /// Index is PackageId, value encodes both decision and level
     decision_map: Vec<i32>,
 
+    /// Maps package ID to the rule that caused the decision (if any)
+    /// Index is PackageId. This provides O(1) lookup compared to scanning the queue.
+    decision_reason: Vec<Option<u32>>,
+
     /// Queue of decisions in order made [(literal, rule_id)]
     decision_queue: Vec<(Literal, Option<u32>)>,
 
@@ -28,6 +32,7 @@ impl Decisions {
     pub fn new() -> Self {
         Self {
             decision_map: Vec::new(),
+            decision_reason: Vec::new(),
             decision_queue: Vec::new(),
             level: 0,
         }
@@ -37,6 +42,7 @@ impl Decisions {
     pub fn with_capacity(max_package_id: usize) -> Self {
         Self {
             decision_map: vec![0; max_package_id + 1],
+            decision_reason: vec![None; max_package_id + 1],
             decision_queue: Vec::with_capacity(max_package_id),
             level: 0,
         }
@@ -48,6 +54,7 @@ impl Decisions {
         let id = package_id as usize;
         if id >= self.decision_map.len() {
             self.decision_map.resize(id + 1, 0);
+            self.decision_reason.resize(id + 1, None);
         }
     }
 
@@ -93,6 +100,7 @@ impl Decisions {
         // Store level+1 so that level 0 doesn't become 0 (which means undecided)
         let level_value = (self.level + 1) as i32;
         self.decision_map[id] = if literal > 0 { level_value } else { -level_value };
+        self.decision_reason[id] = rule_id;
         self.decision_queue.push((literal, rule_id));
 
         true
@@ -185,16 +193,16 @@ impl Decisions {
     }
 
     /// Get the rule that caused a decision
+    #[inline]
     pub fn decision_rule(&self, literal: Literal) -> Option<u32> {
         let package_id = literal.unsigned_abs() as PackageId;
+        let id = package_id as usize;
 
-        // Find in queue (could be optimized with a separate map if needed)
-        for &(lit, rule_id) in &self.decision_queue {
-            if lit.unsigned_abs() as PackageId == package_id {
-                return rule_id;
-            }
+        if id >= self.decision_reason.len() {
+            return None;
         }
-        None
+
+        self.decision_reason[id]
     }
 
     /// Revert all decisions at levels > target_level
@@ -203,9 +211,13 @@ impl Decisions {
         let target = (target_level + 1) as i32;
 
         // Clear decisions above target level
-        for decision in &mut self.decision_map {
+        for (id, decision) in self.decision_map.iter_mut().enumerate() {
             if *decision != 0 && (decision.unsigned_abs() as i32) > target {
                 *decision = 0;
+                // Also clear reason
+                if id < self.decision_reason.len() {
+                    self.decision_reason[id] = None;
+                }
             }
         }
 
@@ -260,6 +272,7 @@ impl Decisions {
     /// Reset all decisions
     pub fn reset(&mut self) {
         self.decision_map.fill(0);
+        self.decision_reason.fill(None);
         self.decision_queue.clear();
         self.level = 0;
     }

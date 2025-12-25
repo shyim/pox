@@ -414,6 +414,9 @@ impl ComposerRepository {
 
         pkg.extra = data.extra.clone().or_else(|| base.and_then(|b| b.extra.clone()));
 
+        // Replace self.version constraints with actual version
+        pkg.replace_self_version();
+
         pkg
     }
 

@@ -286,6 +286,9 @@ impl VcsRepository {
                 .collect();
         }
 
+        // Replace self.version constraints with actual version
+        pkg.replace_self_version();
+
         Ok(pkg)
     }
 }

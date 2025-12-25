@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use super::decisions::Decisions;
 use super::pool::{Pool, PackageId};
 use super::pool_optimizer::PoolOptimizer;

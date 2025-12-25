@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use super::rule::{Rule, Literal};
 use super::rule_set::RuleSet;
 
@@ -10,8 +8,9 @@ use super::rule_set::RuleSet;
 /// literal to watch. This reduces propagation from O(n) to O(1) average.
 #[derive(Debug)]
 pub struct WatchGraph {
-    /// Maps literal -> list of (rule_id, other_watched_literal)
-    watches: HashMap<Literal, Vec<WatchNode>>,
+    /// Maps literal index -> list of (rule_id, other_watched_literal)
+    /// Index is mapped from literal using literal_to_index
+    watches: Vec<Vec<WatchNode>>,
 }
 
 /// A watch node linking a rule to a watched literal
@@ -27,8 +26,27 @@ impl WatchGraph {
     /// Create a new empty watch graph
     pub fn new() -> Self {
         Self {
-            watches: HashMap::new(),
+            watches: Vec::new(),
         }
+    }
+
+    /// Convert literal to index (handles positive and negative literals)
+    fn literal_to_index(literal: Literal) -> usize {
+        let abs = literal.abs() as usize;
+        if literal > 0 {
+            abs * 2
+        } else {
+            abs * 2 + 1
+        }
+    }
+
+    /// Get mutable reference to watches for a literal, resizing if needed
+    fn get_watches_mut(&mut self, literal: Literal) -> &mut Vec<WatchNode> {
+        let idx = Self::literal_to_index(literal);
+        if idx >= self.watches.len() {
+            self.watches.resize(idx + 1, Vec::new());
+        }
+        &mut self.watches[idx]
     }
 
     /// Build the watch graph from a rule set
@@ -62,13 +80,10 @@ impl WatchGraph {
             // Each watch node points to the first literal as "other" (just for the struct)
             let first = literals[0];
             for &lit in literals {
-                self.watches
-                    .entry(lit)
-                    .or_default()
-                    .push(WatchNode {
-                        rule_id,
-                        other_watch: first, // Placeholder, multi-conflict handles this specially
-                    });
+                self.get_watches_mut(lit).push(WatchNode {
+                    rule_id,
+                    other_watch: first, // Placeholder, multi-conflict handles this specially
+                });
             }
             return;
         }
@@ -78,47 +93,43 @@ impl WatchGraph {
         let watch2 = literals[1];
 
         // Add watch for first literal
-        self.watches
-            .entry(watch1)
-            .or_default()
-            .push(WatchNode {
-                rule_id,
-                other_watch: watch2,
-            });
+        self.get_watches_mut(watch1).push(WatchNode {
+            rule_id,
+            other_watch: watch2,
+        });
 
         // Add watch for second literal
-        self.watches
-            .entry(watch2)
-            .or_default()
-            .push(WatchNode {
-                rule_id,
-                other_watch: watch1,
-            });
+        self.get_watches_mut(watch2).push(WatchNode {
+            rule_id,
+            other_watch: watch1,
+        });
     }
 
     /// Get rules watching a specific literal
     pub fn get_watches(&self, literal: Literal) -> &[WatchNode] {
-        self.watches.get(&literal).map(|v| v.as_slice()).unwrap_or(&[])
+        let idx = Self::literal_to_index(literal);
+        if idx < self.watches.len() {
+            &self.watches[idx]
+        } else {
+            &[]
+        }
     }
 
     /// Remove a watch from a literal
     fn remove_watch(&mut self, literal: Literal, rule_id: u32) {
-        if let Some(watches) = self.watches.get_mut(&literal) {
-            watches.retain(|w| w.rule_id != rule_id);
+        let idx = Self::literal_to_index(literal);
+        if idx < self.watches.len() {
+            self.watches[idx].retain(|w| w.rule_id != rule_id);
         }
     }
 
     /// Move a watch from one literal to another
     pub fn move_watch(&mut self, rule_id: u32, from: Literal, to: Literal, other: Literal) {
         self.remove_watch(from, rule_id);
-
-        self.watches
-            .entry(to)
-            .or_default()
-            .push(WatchNode {
-                rule_id,
-                other_watch: other,
-            });
+        self.get_watches_mut(to).push(WatchNode {
+             rule_id,
+             other_watch: other,
+        });
     }
 }
 
@@ -187,7 +198,7 @@ impl<'a> Propagator<'a> {
             // When we decide +A (install A), the literal -A becomes false, and we need to propagate
             // that all other packages in the conflict must NOT be installed
             if rule.is_multi_conflict() {
-                let result = self.propagate_multi_conflict(rule, false_literal, &mut is_satisfied);
+                let result = self.propagate_multi_conflict(rule, false_literal, &mut is_satisfied, &mut results);
                 if result != PropagateResult::Ok {
                     results.push(result);
                 }
@@ -232,6 +243,7 @@ impl<'a> Propagator<'a> {
         rule: &Rule,
         false_literal: Literal,
         is_satisfied: &mut F,
+        results: &mut Vec<PropagateResult>,
     ) -> PropagateResult
     where
         F: FnMut(Literal) -> Option<bool>,
@@ -259,7 +271,7 @@ impl<'a> Propagator<'a> {
                 None => {
                     // Undecided - must propagate that this package cannot be installed
                     // The literal is negative (-pkg), so to satisfy it, the package must not be installed
-                    return PropagateResult::Unit(lit, rule.id());
+                    results.push(PropagateResult::Unit(lit, rule.id()));
                 }
             }
         }
@@ -331,6 +343,8 @@ impl<'a> Propagator<'a> {
             match is_satisfied(lit) {
                 Some(true) => {
                     // Found a true literal - rule is satisfied
+                    // Move watch to this literal
+                    self.graph.move_watch(rule.id(), false_literal, lit, undecided);
                     return PropagateResult::Ok;
                 }
                 None => {

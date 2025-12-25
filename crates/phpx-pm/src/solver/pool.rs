@@ -104,6 +104,9 @@ pub struct Pool {
     /// Cached parsed constraints (constraint string -> parsed constraint)
     parsed_constraints: RefCell<HashMap<String, Option<Box<dyn ConstraintInterface>>>>,
 
+    /// Cached version constraints (package id -> constraint)
+    version_constraints: RefCell<HashMap<PackageId, Option<Constraint>>>,
+
     /// Maps alias package IDs to their base package IDs
     alias_map: HashMap<PackageId, PackageId>,
 
@@ -148,6 +151,7 @@ impl Pool {
             package_repos: HashMap::new(),
             normalized_versions: RefCell::new(HashMap::new()),
             parsed_constraints: RefCell::new(HashMap::new()),
+            version_constraints: RefCell::new(HashMap::new()),
             alias_map: HashMap::new(),
             minimum_stability,
             stability_flags: HashMap::new(),
@@ -202,6 +206,12 @@ impl Pool {
     /// Add a package to the pool from a specific repository, returning its ID
     /// Returns 0 if the package doesn't meet stability requirements (filtered out)
     pub fn add_package_from_repo(&mut self, package: Package, repo_name: Option<&str>) -> PackageId {
+        self.add_package_arc(Arc::new(package), repo_name)
+    }
+
+    /// Add an existing package (Arc) to the pool from a specific repository, returning its ID
+    /// This avoids deep cloning the package data
+    pub fn add_package_arc(&mut self, package: Arc<Package>, repo_name: Option<&str>) -> PackageId {
         // Check stability requirements
         if !self.meets_stability_requirement(&package) {
             return 0; // Package filtered out due to stability
@@ -237,9 +247,8 @@ impl Pool {
             self.package_repos.insert(id, repo.to_string());
         }
 
-        let pkg_arc = Arc::new(package);
-        self.entries.push(PoolEntry::Package(Arc::clone(&pkg_arc)));
-        self.packages.push(pkg_arc);
+        self.entries.push(PoolEntry::Package(Arc::clone(&package)));
+        self.packages.push(package);
         id
     }
 
@@ -283,7 +292,7 @@ impl Pool {
     }
 
     /// Add an alias package to the pool (internal method)
-    fn add_alias_internal(&mut self, alias: AliasPackage, repo_name: Option<String>) -> PackageId {
+    pub fn add_alias_package_arc(&mut self, alias: Arc<AliasPackage>, repo_name: Option<&str>) -> PackageId {
         let id = self.entries.len() as PackageId;
         let name = alias.name().to_lowercase();
 
@@ -313,11 +322,9 @@ impl Pool {
         let base_pkg = alias.alias_of();
         let base_id = self.find_package_id(base_pkg.name(), base_pkg.version());
 
-        let alias_arc = Arc::new(alias);
-        self.entries.push(PoolEntry::Alias(alias_arc));
+        self.entries.push(PoolEntry::Alias(Arc::clone(&alias)));
 
         // Also add a placeholder to packages to keep indices in sync
-        // (This is a temporary measure until we fully migrate away from packages vec)
         self.packages.push(Arc::new(Package::new("__alias_placeholder__", "0.0.0")));
 
         // Track alias relationship
@@ -327,10 +334,15 @@ impl Pool {
 
         // Track repository source for alias
         if let Some(repo) = repo_name {
-            self.package_repos.insert(id, repo);
+            self.package_repos.insert(id, repo.to_string());
         }
 
         id
+    }
+
+    /// Add an alias package to the pool (internal method)
+    fn add_alias_internal(&mut self, alias: AliasPackage, repo_name: Option<String>) -> PackageId {
+        self.add_alias_package_arc(Arc::new(alias), repo_name.as_deref())
     }
 
     /// Find a package ID by name and version
@@ -633,13 +645,23 @@ impl Pool {
         };
 
         // Create a version constraint (== normalized_version)
-        let version_constraint = match Constraint::new(Operator::Equal, normalized_version) {
-            Ok(c) => c,
-            Err(_) => return true,
-        };
-
-        // Check if the version matches the constraint
-        parsed_constraint.matches(&version_constraint)
+        // Use cached version constraint if available
+        let binding = self.version_constraints.borrow();
+        if let Some(cached) = binding.get(&id) {
+            match cached {
+                Some(vc) => parsed_constraint.matches(vc),
+                None => true, // Invalid version, permissive
+            }
+        } else {
+            drop(binding);
+            let vc = Constraint::new(Operator::Equal, normalized_version).ok();
+            let matches = match &vc {
+                Some(c) => parsed_constraint.matches(c),
+                None => true,
+            };
+            self.version_constraints.borrow_mut().insert(id, vc);
+            matches
+        }
     }
 
     /// Get the total number of packages (excluding placeholder)
