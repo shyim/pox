@@ -5,19 +5,43 @@ use console::style;
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use phpx_pm::json::ComposerJson;
 
-/// Script execution context to track environment variables
+/// Default process timeout in seconds (same as Composer)
+const DEFAULT_PROCESS_TIMEOUT: u64 = 300;
+
+/// Script execution context to track environment variables and timeout settings
 pub struct ScriptContext {
     env_vars: HashMap<String, String>,
+    /// Process timeout in seconds, None means no timeout
+    process_timeout: Option<u64>,
 }
 
 impl ScriptContext {
     pub fn new() -> Self {
+        // Check COMPOSER_PROCESS_TIMEOUT environment variable
+        let process_timeout = match std::env::var("COMPOSER_PROCESS_TIMEOUT") {
+            Ok(val) => {
+                if val == "0" {
+                    None // 0 means no timeout
+                } else {
+                    val.parse::<u64>().ok().or(Some(DEFAULT_PROCESS_TIMEOUT))
+                }
+            }
+            Err(_) => Some(DEFAULT_PROCESS_TIMEOUT),
+        };
+
         Self {
             env_vars: HashMap::new(),
+            process_timeout,
         }
+    }
+
+    /// Disable the process timeout
+    pub fn disable_timeout(&mut self) {
+        self.process_timeout = None;
     }
 }
 
@@ -175,6 +199,12 @@ pub fn run_command(
         return Ok(0);
     }
 
+    // Handle Composer\Config::disableProcessTimeout - disable timeout for subsequent commands
+    if cmd.contains("Composer\\Config::disableProcessTimeout") {
+        ctx.disable_timeout();
+        return Ok(0);
+    }
+
     // Handle @php - execute with current PHP binary
     if let Some(php_cmd) = cmd.strip_prefix("@php ") {
         let php_binary = std::env::current_exe()
@@ -187,7 +217,7 @@ pub fn run_command(
             format!("{} {} {}", php_binary, php_cmd, extra_args.join(" "))
         };
 
-        return execute_shell_command(&full_cmd, working_dir, &ctx.env_vars);
+        return execute_shell_command(&full_cmd, working_dir, ctx);
     }
 
     // Handle @composer - execute composer command via phpx
@@ -209,7 +239,7 @@ pub fn run_command(
             format!("{} {} {}", phpx_binary, adjusted_cmd, extra_args.join(" "))
         };
 
-        return execute_shell_command(&full_cmd, working_dir, &ctx.env_vars);
+        return execute_shell_command(&full_cmd, working_dir, ctx);
     }
 
     // Handle @script-name - reference to another script
@@ -241,11 +271,11 @@ pub fn run_command(
         format!("{} {}", cmd, extra_args.join(" "))
     };
 
-    execute_shell_command(&full_cmd, working_dir, &ctx.env_vars)
+    execute_shell_command(&full_cmd, working_dir, ctx)
 }
 
-/// Execute a shell command
-fn execute_shell_command(cmd: &str, working_dir: &Path, env_vars: &HashMap<String, String>) -> Result<i32> {
+/// Execute a shell command with optional timeout
+fn execute_shell_command(cmd: &str, working_dir: &Path, ctx: &ScriptContext) -> Result<i32> {
     #[cfg(unix)]
     let mut command = Command::new("sh");
     #[cfg(unix)]
@@ -259,15 +289,52 @@ fn execute_shell_command(cmd: &str, working_dir: &Path, env_vars: &HashMap<Strin
     command.current_dir(working_dir);
 
     // Add custom environment variables
-    for (key, value) in env_vars {
+    for (key, value) in &ctx.env_vars {
         command.env(key, value);
     }
 
-    let status = command
-        .status()
+    // If no timeout, just run normally
+    if ctx.process_timeout.is_none() {
+        let status = command
+            .status()
+            .with_context(|| format!("Failed to execute command: {}", cmd))?;
+        return Ok(status.code().unwrap_or(1));
+    }
+
+    // Run with timeout
+    let timeout_secs = ctx.process_timeout.unwrap();
+    let timeout = Duration::from_secs(timeout_secs);
+
+    let mut child = command
+        .spawn()
         .with_context(|| format!("Failed to execute command: {}", cmd))?;
 
-    Ok(status.code().unwrap_or(1))
+    let start = Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return Ok(status.code().unwrap_or(1));
+            }
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    // Kill the process
+                    let _ = child.kill();
+                    eprintln!(
+                        "{} Process timed out after {} seconds. Use Composer\\Config::disableProcessTimeout to disable.",
+                        style("Error:").red().bold(),
+                        timeout_secs
+                    );
+                    return Ok(1);
+                }
+                // Sleep briefly before checking again
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!("Error waiting for process: {}", e));
+            }
+        }
+    }
 }
 
 /// List available scripts
