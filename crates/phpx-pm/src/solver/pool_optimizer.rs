@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use phpx_semver::{Constraint, Operator, VersionParser};
+use phpx_semver::{Constraint, ConstraintInterface, Operator, VersionParser};
 
 use super::policy::Policy;
 use super::pool::{Pool, PoolEntry, PackageId};
@@ -42,6 +42,15 @@ pub struct PoolOptimizer<'a> {
 
     /// Version parser for constraint operations
     version_parser: VersionParser,
+
+    /// Cache for parsed constraints (constraint_string -> parsed constraint)
+    constraint_cache: HashMap<String, Option<Box<dyn ConstraintInterface>>>,
+
+    /// Cache for normalized versions (raw_version -> normalized_version)
+    version_cache: HashMap<String, String>,
+
+    /// Cache for version constraints (normalized_version -> Constraint for matching)
+    version_constraint_cache: HashMap<String, Option<Constraint>>,
 }
 
 impl<'a> PoolOptimizer<'a> {
@@ -55,6 +64,9 @@ impl<'a> PoolOptimizer<'a> {
             packages_to_remove: HashSet::new(),
             aliases_per_package: HashMap::new(),
             version_parser: VersionParser::new(),
+            constraint_cache: HashMap::new(),
+            version_cache: HashMap::new(),
+            version_constraint_cache: HashMap::new(),
         }
     }
 
@@ -66,9 +78,15 @@ impl<'a> PoolOptimizer<'a> {
         self.conflict_constraints.clear();
         self.packages_to_remove.clear();
         self.aliases_per_package.clear();
+        self.constraint_cache.clear();
+        self.version_cache.clear();
+        self.version_constraint_cache.clear();
 
         // Prepare: collect constraints and mark irremovable packages
         self.prepare(request, pool);
+
+        // Pre-warm caches: parse all unique constraints and normalize all unique versions upfront
+        self.prewarm_caches(pool);
 
         // Optimization 1: Remove packages with identical dependencies, keeping only the best
         self.optimize_by_identical_dependencies(pool);
@@ -78,6 +96,53 @@ impl<'a> PoolOptimizer<'a> {
 
         // Apply removals and create new pool
         self.apply_removals_to_pool(pool)
+    }
+
+    /// Pre-warm caches by parsing all constraints and normalizing all versions upfront.
+    /// This avoids repeated parsing during the hot loop.
+    fn prewarm_caches(&mut self, pool: &Pool) {
+        // Collect all unique constraint strings
+        let mut all_constraints: HashSet<String> = HashSet::new();
+        for constraints in self.require_constraints.values() {
+            all_constraints.extend(constraints.iter().cloned());
+        }
+        for constraints in self.conflict_constraints.values() {
+            all_constraints.extend(constraints.iter().cloned());
+        }
+
+        // Parse all constraints upfront
+        for constraint_str in &all_constraints {
+            if !self.constraint_cache.contains_key(constraint_str) {
+                let parsed = self.version_parser.parse_constraints(constraint_str).ok()
+                    .map(|c| c as Box<dyn ConstraintInterface>);
+                self.constraint_cache.insert(constraint_str.clone(), parsed);
+            }
+        }
+
+        // Collect all unique versions from packages
+        let mut all_versions: HashSet<String> = HashSet::new();
+        for id in pool.all_package_ids() {
+            if let Some(pkg) = pool.package(id) {
+                all_versions.insert(pkg.version.clone());
+            }
+        }
+
+        // Normalize all versions and create version constraints upfront
+        for version in &all_versions {
+            if !self.version_cache.contains_key(version) {
+                let normalized = self.version_parser.normalize(version)
+                    .unwrap_or_else(|_| version.clone());
+
+                // Cache the normalized version
+                self.version_cache.insert(version.clone(), normalized.clone());
+
+                // Also create and cache the version constraint
+                if !self.version_constraint_cache.contains_key(&normalized) {
+                    let version_constraint = Constraint::new(Operator::Equal, normalized.clone()).ok();
+                    self.version_constraint_cache.insert(normalized, version_constraint);
+                }
+            }
+        }
     }
 
     /// Prepare optimization by collecting constraints and marking irremovable packages.
@@ -194,6 +259,16 @@ impl<'a> PoolOptimizer<'a> {
         // Track which packages are in which groups for later lookup
         let mut package_group_lookup: HashMap<PackageId, (String, String, String)> = HashMap::new();
 
+        // Collect package info first to avoid borrow issues
+        struct PackageInfo {
+            id: PackageId,
+            version: String,
+            name: String,
+            dep_hash: String,
+        }
+
+        let mut package_infos: Vec<PackageInfo> = Vec::new();
+
         for id in pool.all_package_ids() {
             // Skip irremovable packages
             if self.irremovable_packages.contains(&id) {
@@ -212,20 +287,37 @@ impl<'a> PoolOptimizer<'a> {
             // Initially mark for removal
             self.packages_to_remove.insert(id);
 
-            // Calculate dependency hash for this package
-            let dep_hash = self.calculate_dependency_hash(pkg);
-            let pkg_name = pkg.name.to_lowercase();
+            package_infos.push(PackageInfo {
+                id,
+                version: pkg.version.clone(),
+                name: pkg.name.to_lowercase(),
+                dep_hash: self.calculate_dependency_hash(pkg),
+            });
+        }
 
+        // Pre-collect constraints by package name to avoid borrow issues
+        let require_constraints_snapshot: HashMap<String, Vec<String>> = self.require_constraints
+            .iter()
+            .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
+            .collect();
+
+        let conflict_constraints_snapshot: HashMap<String, Vec<String>> = self.conflict_constraints
+            .iter()
+            .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
+            .collect();
+
+        // Now process each package
+        for info in package_infos {
             // Check which constraint groups this package belongs to
-            if let Some(require_constraints) = self.require_constraints.get(&pkg_name) {
+            if let Some(require_constraints) = require_constraints_snapshot.get(&info.name) {
                 for constraint_str in require_constraints {
-                    if self.version_matches_constraint(&pkg.version, constraint_str) {
+                    if self.version_matches_constraint(&info.version, constraint_str) {
                         // Build the group key including conflicts if any
                         let mut group_parts = vec![format!("require:{}", constraint_str)];
 
-                        if let Some(conflict_constraints) = self.conflict_constraints.get(&pkg_name) {
+                        if let Some(conflict_constraints) = conflict_constraints_snapshot.get(&info.name) {
                             for conflict_str in conflict_constraints {
-                                if self.version_matches_constraint(&pkg.version, conflict_str) {
+                                if self.version_matches_constraint(&info.version, conflict_str) {
                                     group_parts.push(format!("conflict:{}", conflict_str));
                                 }
                             }
@@ -237,15 +329,15 @@ impl<'a> PoolOptimizer<'a> {
 
                         // Add to group
                         groups
-                            .entry(pkg_name.clone())
+                            .entry(info.name.clone())
                             .or_default()
                             .entry(group_hash.clone())
                             .or_default()
-                            .entry(dep_hash.clone())
+                            .entry(info.dep_hash.clone())
                             .or_default()
-                            .push(id);
+                            .push(info.id);
 
-                        package_group_lookup.insert(id, (pkg_name.clone(), group_hash, dep_hash.clone()));
+                        package_group_lookup.insert(info.id, (info.name.clone(), group_hash, info.dep_hash.clone()));
                     }
                 }
             }
@@ -366,8 +458,9 @@ impl<'a> PoolOptimizer<'a> {
             return;
         }
 
-        // Build an index of packages by name (excluding irremovable and aliases)
-        let mut package_index: HashMap<String, Vec<PackageId>> = HashMap::new();
+        // Build an index of packages by name with version info (excluding irremovable and aliases)
+        // Store (id, version) to avoid repeated pool lookups
+        let mut package_index: HashMap<String, Vec<(PackageId, String)>> = HashMap::new();
 
         for id in pool.all_package_ids() {
             // Skip irremovable
@@ -396,75 +489,101 @@ impl<'a> PoolOptimizer<'a> {
                 package_index
                     .entry(pkg.name.to_lowercase())
                     .or_default()
-                    .push(id);
+                    .push((id, pkg.version.clone()));
             }
         }
 
-        // For each locked package, check its requirements and filter out
-        // packages that don't match
+        // Collect all filter operations to perform (to avoid borrow issues)
+        // (package_name, constraint) pairs we need to check
+        let mut filter_ops: Vec<(String, String)> = Vec::new();
+
         for locked in &request.locked_packages {
             // Check if the locked package is still required
-            let is_unused = {
-                let locked_name = locked.name.to_lowercase();
-                !self.require_constraints.contains_key(&locked_name)
-            };
-
-            if is_unused {
+            let locked_name = locked.name.to_lowercase();
+            if !self.require_constraints.contains_key(&locked_name) {
                 continue;
             }
 
-            // Use the locked package's requirements to filter
+            // Collect filter operations
             for (require_name, constraint) in &locked.require {
                 let require_name_lower = require_name.to_lowercase();
+                if package_index.contains_key(&require_name_lower) {
+                    filter_ops.push((require_name_lower, constraint.clone()));
+                }
+            }
+        }
 
+        // Now apply filters
+        for (require_name_lower, constraint) in filter_ops {
+            if let Some(candidates) = package_index.get(&require_name_lower) {
+                // Collect IDs to remove
+                let mut to_remove: Vec<PackageId> = Vec::new();
+
+                for (id, version) in candidates {
+                    if !self.version_matches_constraint(version, &constraint) {
+                        to_remove.push(*id);
+                    }
+                }
+
+                // Apply removals
+                for id in &to_remove {
+                    self.packages_to_remove.insert(*id);
+                    // Also mark aliases for removal
+                    if let Some(aliases) = self.aliases_per_package.get(id).cloned() {
+                        for alias_id in aliases {
+                            self.packages_to_remove.insert(alias_id);
+                        }
+                    }
+                }
+
+                // Update the index to remove filtered packages
                 if let Some(candidates) = package_index.get_mut(&require_name_lower) {
-                    // Filter out packages that don't match the constraint
-                    let mut to_remove = Vec::new();
-
-                    for &id in candidates.iter() {
-                        if let Some(pkg) = pool.package(id) {
-                            if !self.version_matches_constraint(&pkg.version, constraint) {
-                                to_remove.push(id);
-                            }
-                        }
-                    }
-
-                    for id in to_remove {
-                        self.packages_to_remove.insert(id);
-                        // Also mark aliases for removal
-                        if let Some(aliases) = self.aliases_per_package.get(&id).cloned() {
-                            for alias_id in aliases {
-                                self.packages_to_remove.insert(alias_id);
-                            }
-                        }
-                        candidates.retain(|&x| x != id);
-                    }
+                    candidates.retain(|(id, _)| !to_remove.contains(id));
                 }
             }
         }
     }
 
     /// Check if a version matches a constraint.
-    fn version_matches_constraint(&self, version: &str, constraint_str: &str) -> bool {
+    fn version_matches_constraint(&mut self, version: &str, constraint_str: &str) -> bool {
         // Handle wildcard
         if constraint_str == "*" || constraint_str.is_empty() {
             return true;
         }
 
-        // Normalize version
-        let normalized_version = self.version_parser.normalize(version).unwrap_or_else(|_| version.to_string());
-
-        // Parse constraint
-        let Ok(parsed_constraint) = self.version_parser.parse_constraints(constraint_str) else {
-            return true; // Be permissive on parse failure
+        // Get normalized version from cache, or normalize and cache it
+        let normalized_version = if let Some(cached) = self.version_cache.get(version) {
+            cached.clone()
+        } else {
+            let normalized = self.version_parser.normalize(version)
+                .unwrap_or_else(|_| version.to_string());
+            self.version_cache.insert(version.to_string(), normalized.clone());
+            normalized
         };
 
-        // Create version constraint
-        let Ok(version_constraint) = Constraint::new(Operator::Equal, normalized_version) else {
-            return true;
-        };
+        // Ensure version constraint is cached
+        if !self.version_constraint_cache.contains_key(&normalized_version) {
+            let vc = Constraint::new(Operator::Equal, normalized_version.clone()).ok();
+            self.version_constraint_cache.insert(normalized_version.clone(), vc);
+        }
 
-        parsed_constraint.matches(&version_constraint)
+        // Ensure parsed constraint is cached
+        if !self.constraint_cache.contains_key(constraint_str) {
+            let parsed = self.version_parser.parse_constraints(constraint_str).ok()
+                .map(|c| c as Box<dyn ConstraintInterface>);
+            self.constraint_cache.insert(constraint_str.to_string(), parsed);
+        }
+
+        // Now do lookups (no mutation needed)
+        let version_constraint = self.version_constraint_cache.get(&normalized_version)
+            .and_then(|opt| opt.as_ref());
+        let parsed_constraint = self.constraint_cache.get(constraint_str)
+            .and_then(|opt| opt.as_ref());
+
+        match (version_constraint, parsed_constraint) {
+            (Some(vc), Some(pc)) => pc.matches(vc),
+            _ => true, // Be permissive on failure
+        }
     }
 
     /// Find a package ID by name and version.

@@ -31,7 +31,7 @@ impl<'a> Solver<'a> {
         Self {
             pool,
             policy,
-            optimize_pool: true, // Enable optimization by default
+            optimize_pool: true, // Pool optimization enabled with caching
         }
     }
 
@@ -49,9 +49,12 @@ impl<'a> Solver<'a> {
     /// Returns a Transaction on success, or a ProblemSet explaining failures.
     pub fn solve(&self, request: &Request) -> Result<Transaction, ProblemSet> {
         if self.optimize_pool {
+            let opt_start = std::time::Instant::now();
             // Optimize the pool first to reduce the search space
             let mut optimizer = PoolOptimizer::new(self.policy);
             let optimized_pool = optimizer.optimize(request, self.pool);
+            eprintln!("[SOLVER] Pool optimization: {:?}, {} -> {} packages",
+                opt_start.elapsed(), self.pool.len(), optimized_pool.len());
             self.solve_with_pool(&optimized_pool, request)
         } else {
             self.solve_with_pool(self.pool, request)
@@ -60,20 +63,32 @@ impl<'a> Solver<'a> {
 
     /// Internal solve method that works with any pool reference.
     fn solve_with_pool(&self, pool: &Pool, request: &Request) -> Result<Transaction, ProblemSet> {
+        let start = std::time::Instant::now();
+
         // Generate rules from the dependency graph
         let generator = RuleGenerator::new(pool);
         let rules = generator.generate(request);
 
+        eprintln!("[SOLVER] Rule generation: {:?}, {} rules", start.elapsed(), rules.len());
+        let rule_start = std::time::Instant::now();
+
         // Create solver state
         let mut state = SolverState::new(rules);
+
+        eprintln!("[SOLVER] State creation: {:?}", rule_start.elapsed());
+        let sat_start = std::time::Instant::now();
 
         // Run the SAT solver
         match self.run_sat(&mut state, pool, request) {
             Ok(()) => {
+                eprintln!("[SOLVER] SAT solving: {:?}", sat_start.elapsed());
                 // Build transaction from decisions
                 Ok(self.build_transaction(&state, pool, request))
             }
-            Err(problems) => Err(problems),
+            Err(problems) => {
+                eprintln!("[SOLVER] SAT solving (failed): {:?}", sat_start.elapsed());
+                Err(problems)
+            },
         }
     }
 
@@ -118,6 +133,7 @@ impl<'a> Solver<'a> {
                     if state.decisions.undecided(alternative) {
                         // Revert only the decision at this level
                         state.decisions.revert_to_level(current_level - 1);
+                        state.reset_propagate_index();
                         state.decisions.increment_level();
 
                         // Decide to NOT install the previous choice and try the alternative
@@ -138,6 +154,7 @@ impl<'a> Solver<'a> {
 
                     // Backtrack to appropriate level
                     state.decisions.revert_to_level(backtrack_level);
+                    state.reset_propagate_index();
 
                     // Remove branches above backtrack level
                     state.branches.retain(|b| b.level <= backtrack_level);
@@ -243,21 +260,12 @@ impl<'a> Solver<'a> {
     }
 
     /// Propagate consequences of current decisions using unit propagation
+    /// Uses propagate_index to avoid re-processing already propagated decisions
     fn propagate(&self, state: &mut SolverState) -> Result<(), u32> {
-        // Queue of literals to propagate
-        let mut queue: VecDeque<Literal> = state.decisions
-            .queue()
-            .iter()
-            .map(|(lit, _)| *lit)
-            .collect();
-
-        let mut propagated = std::collections::HashSet::new();
-
-        while let Some(literal) = queue.pop_front() {
-            if propagated.contains(&literal) {
-                continue;
-            }
-            propagated.insert(literal);
+        // Process only new decisions since last propagation
+        while state.propagate_index < state.decisions.len() {
+            let (literal, _) = state.decisions.queue()[state.propagate_index];
+            state.propagate_index += 1;
 
             // Create a closure to check literal satisfaction
             let is_satisfied = |lit: Literal| -> Option<bool> {
@@ -284,7 +292,6 @@ impl<'a> Solver<'a> {
                         }
                         if !state.decisions.satisfied(unit_lit) {
                             state.decisions.decide(unit_lit, Some(rule_id));
-                            queue.push_back(unit_lit);
                         }
                     }
                     PropagateResult::Conflict(rule_id) => {
@@ -298,73 +305,82 @@ impl<'a> Solver<'a> {
     }
 
     /// Select the next undecided requirement to branch on
+    /// Uses direct slice iteration like Composer for performance
     fn select_next(&self, state: &SolverState, _request: &Request) -> Option<(Vec<PackageId>, String)> {
-        // First, check unsatisfied root requirements
-        for rule in state.rules.rules_of_type(RuleType::RootRequire) {
+        let rules = state.rules.as_slice();
+
+        for rule in rules {
             if rule.is_disabled() {
                 continue;
             }
 
+            let rule_type = rule.rule_type();
             let literals = rule.literals();
-            let undecided: Vec<_> = literals
-                .iter()
-                .filter(|&&lit| {
-                    let pkg_id = lit.unsigned_abs() as PackageId;
-                    state.decisions.undecided(pkg_id)
-                })
-                .copied()
-                .collect();
 
-            if !undecided.is_empty() {
-                // Check if rule is already satisfied
-                let satisfied = literals.iter().any(|&lit| state.decisions.satisfied(lit));
-                if !satisfied {
-                    let candidates: Vec<_> = undecided
-                        .into_iter()
-                        .map(|lit| lit.unsigned_abs() as PackageId)
-                        .collect();
-                    let name = rule.target_name().unwrap_or("unknown").to_string();
-                    return Some((candidates, name));
+            // Handle root requirements first (they have priority)
+            if rule_type == RuleType::RootRequire || rule_type == RuleType::Fixed {
+                let mut decision_queue = Vec::new();
+                let mut none_satisfied = true;
+
+                for &lit in literals {
+                    if state.decisions.satisfied(lit) {
+                        none_satisfied = false;
+                        break;
+                    }
+                    if lit > 0 && state.decisions.undecided(lit as PackageId) {
+                        decision_queue.push(lit as PackageId);
+                    }
                 }
-            }
-        }
 
-        // Then check unsatisfied package requirements
-        for rule in state.rules.rules_of_type(RuleType::PackageRequires) {
-            if rule.is_disabled() {
+                if none_satisfied && !decision_queue.is_empty() {
+                    let name = rule.target_name().unwrap_or("unknown").to_string();
+                    return Some((decision_queue, name));
+                }
                 continue;
             }
 
-            let literals = rule.literals();
-
-            // Skip if source package isn't installed
-            if let Some(&source_lit) = literals.first() {
-                let source_id = (-source_lit).unsigned_abs() as PackageId;
-                if !state.decisions.decided_install(source_id) {
+            // Handle package requirements
+            if rule_type == RuleType::PackageRequires {
+                // For requires rules: first literal is negated source (-source, target1, target2, ...)
+                // Rule fires when source is installed (i.e., -source is false)
+                if literals.is_empty() {
                     continue;
                 }
-            }
 
-            // Find undecided targets
-            let undecided: Vec<_> = literals[1..]
-                .iter()
-                .filter(|&&lit| {
-                    let pkg_id = lit.unsigned_abs() as PackageId;
-                    state.decisions.undecided(pkg_id)
-                })
-                .copied()
-                .collect();
+                // Check if source package is installed
+                let source_lit = literals[0]; // This is -source_id
+                if source_lit >= 0 {
+                    continue; // Not a requires rule format we expect
+                }
+                let source_id = (-source_lit) as PackageId;
+                if !state.decisions.decided_install(source_id) {
+                    continue; // Source not installed, skip
+                }
 
-            if !undecided.is_empty() {
-                // Check if rule is already satisfied
-                let satisfied = literals[1..].iter().any(|&lit| state.decisions.satisfied(lit));
-                if !satisfied {
-                    let candidates: Vec<_> = undecided
-                        .into_iter()
-                        .map(|lit| lit.unsigned_abs() as PackageId)
-                        .collect();
+                let mut decision_queue = Vec::new();
+
+                for &lit in &literals[1..] {
+                    if lit <= 0 {
+                        // Negative literal in targets - check if it's violated
+                        if !state.decisions.decided_install((-lit) as PackageId) {
+                            continue; // Negative requirement satisfied
+                        }
+                    } else {
+                        // Positive literal
+                        if state.decisions.satisfied(lit) {
+                            // Rule already satisfied
+                            decision_queue.clear();
+                            break;
+                        }
+                        if state.decisions.undecided(lit as PackageId) {
+                            decision_queue.push(lit as PackageId);
+                        }
+                    }
+                }
+
+                if !decision_queue.is_empty() {
                     let name = rule.target_name().unwrap_or("unknown").to_string();
-                    return Some((candidates, name));
+                    return Some((decision_queue, name));
                 }
             }
         }
@@ -568,6 +584,8 @@ struct SolverState {
     watch_graph: WatchGraph,
     /// Branch points for backtracking
     branches: Vec<Branch>,
+    /// Index of next decision to propagate (avoids re-propagating)
+    propagate_index: usize,
 }
 
 impl SolverState {
@@ -579,7 +597,13 @@ impl SolverState {
             decisions: Decisions::new(),
             watch_graph,
             branches: Vec::new(),
+            propagate_index: 0,
         }
+    }
+
+    /// Reset propagate_index after backtracking
+    fn reset_propagate_index(&mut self) {
+        self.propagate_index = self.decisions.len();
     }
 }
 

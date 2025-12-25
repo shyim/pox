@@ -110,6 +110,18 @@ impl RuleSet {
         self.rules.len()
     }
 
+    /// Get a rule by index (same as ID, but usize)
+    #[inline]
+    pub fn get_by_index(&self, index: usize) -> Option<&Rule> {
+        self.rules.get(index)
+    }
+
+    /// Get direct slice of all rules for fast iteration
+    #[inline]
+    pub fn as_slice(&self) -> &[Rule] {
+        &self.rules
+    }
+
     /// Check if the rule set is empty
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
