@@ -15,7 +15,7 @@ Ideas:
 
 ### General
 
-- [_] A `phpx.toml` file to configure PHP settings like `memory_limit` or other things
+- [X] A `phpx.toml` file to configure PHP settings like `memory_limit` or other things
 
 ### Web Server
 
@@ -65,6 +65,57 @@ Subcommands:
 
 Run 'phpx --help' for more options.
 ```
+
+## Configuration (phpx.toml)
+
+PHPx supports a local `phpx.toml` configuration file in your project directory. This file allows you to configure PHP runtime settings and development server options.
+
+### Example Configuration
+
+```toml
+# PHP runtime configuration
+[php.ini]
+memory_limit = "256M"
+max_execution_time = "30"
+display_errors = "On"
+error_reporting = "E_ALL"
+
+# Development server configuration
+[server]
+host = "0.0.0.0"
+port = 8080
+document_root = "public"
+router = "index.php"
+# worker = "worker.php"  # Optional: Enable worker mode
+# workers = 4            # Number of worker threads
+# watch = ["**/*.php"]   # File patterns to watch for auto-reload
+```
+
+### Configuration Options
+
+#### `[php.ini]`
+
+Any PHP INI setting can be specified here as key-value pairs. These settings are applied when PHP is initialized. CLI arguments (`-d`) take precedence over config file settings.
+
+#### `[server]`
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `host` | string | Address to bind to (default: "127.0.0.1") |
+| `port` | number | Port to listen on (default: 8000) |
+| `document_root` | string | Document root directory (default: ".") |
+| `router` | string | Router script path (optional) |
+| `worker` | string | Worker script for long-running mode (optional) |
+| `workers` | number | Number of worker threads (default: CPU cores) |
+| `watch` | array | Glob patterns for file watching (optional) |
+
+### Configuration Priority
+
+Settings are merged with the following priority (highest to lowest):
+
+1. CLI arguments (e.g., `-d memory_limit=512M`)
+2. `phpx.toml` configuration file
+3. Built-in defaults
 
 ### PM Commands
 

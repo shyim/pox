@@ -1,9 +1,12 @@
 mod add;
+mod config;
 mod pm;
 mod init;
 mod install;
 mod remove;
 mod update;
+
+use config::PhpxConfig;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -122,27 +125,50 @@ fn print_version() {
     println!("{}", v.zend_version);
 }
 
-fn build_ini_entries(defines: &[String]) -> Option<String> {
-    if defines.is_empty() {
+/// Build INI entries by merging config file and CLI arguments
+/// CLI arguments take precedence over config file settings
+fn build_ini_entries(config: Option<&PhpxConfig>, defines: &[String]) -> Option<String> {
+    use std::collections::HashMap;
+
+    let mut ini_map: HashMap<String, String> = HashMap::new();
+
+    // First, load from config file (lower priority)
+    if let Some(cfg) = config {
+        for (key, value) in &cfg.php.ini {
+            ini_map.insert(key.clone(), value.clone());
+        }
+    }
+
+    // Then, apply CLI arguments (higher priority, overrides config)
+    for d in defines {
+        if let Some(pos) = d.find('=') {
+            let key = d[..pos].to_string();
+            let value = d[pos + 1..].to_string();
+            ini_map.insert(key, value);
+        } else {
+            ini_map.insert(d.clone(), "1".to_string());
+        }
+    }
+
+    if ini_map.is_empty() {
         return None;
     }
 
-    let entries: Vec<String> = defines
+    let entries: Vec<String> = ini_map
         .iter()
-        .map(|d| {
-            if d.contains('=') {
-                d.clone()
-            } else {
-                format!("{}=1", d)
-            }
-        })
+        .map(|(k, v)| format!("{}={}", k, v))
         .collect();
 
-    // Each entry needs to be newline terminated
     Some(entries.join("\n") + "\n")
 }
 
-fn run_server(host: &str, port: u16, document_root: &Path, router: Option<&Path>, worker: Option<&Path>, num_workers: usize, watch_patterns: Vec<String>) -> Result<i32> {
+fn run_server(host: &str, port: u16, document_root: &Path, router: Option<&Path>, worker: Option<&Path>, num_workers: usize, watch_patterns: Vec<String>, config: Option<&PhpxConfig>) -> Result<i32> {
+    // Apply INI entries from config for server mode
+    let ini_entries = build_ini_entries(config, &[]);
+    if ini_entries.is_some() {
+        Php::set_ini_entries(ini_entries.as_deref())?;
+    }
+
     let addr = format!("{}:{}", host, port);
     let server = Server::http(&addr).map_err(|e| anyhow::anyhow!("Failed to start server: {}", e))?;
 
@@ -564,6 +590,9 @@ fn guess_content_type(path: &Path) -> String {
 fn run() -> Result<i32> {
     let args = Args::parse();
 
+    // Load phpx.toml config if present
+    let config = PhpxConfig::load_from_cwd()?;
+
     // Handle subcommands first
     if let Some(command) = args.command {
         match command {
@@ -576,7 +605,49 @@ fn run() -> Result<i32> {
                 workers,
                 watch,
             } => {
-                return run_server(&host, port, &document_root, router.as_deref(), worker.as_deref(), workers, watch);
+                // Merge CLI args with config file settings (CLI takes precedence)
+                let effective_host = config.as_ref()
+                    .and_then(|c| c.server.host.clone())
+                    .unwrap_or(host);
+                let effective_port = config.as_ref()
+                    .and_then(|c| c.server.port)
+                    .unwrap_or(port);
+                let effective_doc_root = config.as_ref()
+                    .and_then(|c| c.server.document_root.as_ref().map(PathBuf::from))
+                    .unwrap_or(document_root);
+                let effective_router = router.or_else(|| {
+                    config.as_ref()
+                        .and_then(|c| c.server.router.as_ref().map(PathBuf::from))
+                });
+                let effective_worker = worker.or_else(|| {
+                    config.as_ref()
+                        .and_then(|c| c.server.worker.as_ref().map(PathBuf::from))
+                });
+                let effective_workers = if workers == 0 {
+                    config.as_ref()
+                        .and_then(|c| c.server.workers)
+                        .unwrap_or(0)
+                } else {
+                    workers
+                };
+                let effective_watch = if watch.is_empty() {
+                    config.as_ref()
+                        .map(|c| c.server.watch.clone())
+                        .unwrap_or_default()
+                } else {
+                    watch
+                };
+
+                return run_server(
+                    &effective_host,
+                    effective_port,
+                    &effective_doc_root,
+                    effective_router.as_deref(),
+                    effective_worker.as_deref(),
+                    effective_workers,
+                    effective_watch,
+                    config.as_ref(),
+                );
             }
             Commands::Init(init_args) => {
                 let rt = tokio::runtime::Runtime::new()
@@ -616,9 +687,9 @@ fn run() -> Result<i32> {
         }
     }
 
-    // Set INI entries if any
-    if !args.define.is_empty() {
-        let ini_entries = build_ini_entries(&args.define);
+    // Set INI entries from config file and CLI args
+    let ini_entries = build_ini_entries(config.as_ref(), &args.define);
+    if ini_entries.is_some() {
         Php::set_ini_entries(ini_entries.as_deref())?;
     }
 

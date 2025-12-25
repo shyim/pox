@@ -129,6 +129,7 @@ static int phpx_init(int argc, char **argv) {
     php_embed_module.name = "cli";
     php_embed_module.pretty_name = "PHP CLI embedded in phpx";
     php_embed_module.register_server_variables = phpx_register_variables;
+    php_embed_module.phpinfo_as_text = 1;  /* Output phpinfo as plain text, not HTML */
 
     if (php_embed_init(argc, argv) != SUCCESS) {
         return 1;
