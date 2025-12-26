@@ -338,6 +338,18 @@ mod tests {
             .output()
             .unwrap();
 
+        Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+
+        Command::new("git")
+            .args(["config", "tag.gpgsign", "false"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+
         // Create composer.json
         let composer_json = serde_json::json!({
             "name": "vendor/package",

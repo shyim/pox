@@ -28,6 +28,8 @@ impl Installer {
         let composer_json = &self.composer.composer_json;
         let working_dir = &self.composer.working_dir;
 
+        log::debug!("Reading {}/composer.json", working_dir.display());
+
         println!("{} Updating dependencies", style("Composer").green().bold());
 
         if dry_run {
@@ -46,10 +48,7 @@ impl Installer {
 
         // Setup repository manager
         let repo_manager = self.composer.repository_manager.clone();
-        
-        // Add default packagist if needed (Assuming caller configured it, or we do it here if missing)
-        // In the refactor plan, we trust repo_manager is already configured in Composer factory or caller.
-        
+
         spinner.set_message("Resolving dependencies...");
 
         // Get minimum stability (default to "stable" if not specified)
@@ -59,6 +58,8 @@ impl Installer {
             .parse()
             .unwrap_or(Stability::Stable);
 
+        log::debug!("Minimum stability: {:?}", minimum_stability);
+
         // Build package pool
         let mut pool = Pool::with_minimum_stability(minimum_stability);
 
@@ -66,22 +67,29 @@ impl Installer {
         for (name, constraint) in &composer_json.require {
             if let Some(stability) = extract_stability_flag(constraint) {
                 pool.add_stability_flag(name, stability);
+                log::trace!("Stability flag for {}: {:?}", name, stability);
             }
         }
         for (name, constraint) in &composer_json.require_dev {
             if let Some(stability) = extract_stability_flag(constraint) {
                 pool.add_stability_flag(name, stability);
+                log::trace!("Stability flag for {}: {:?}", name, stability);
             }
         }
 
         // Add platform packages (bypass stability filtering - these are fixed system packages)
+        for pkg in &platform_packages {
+            log::debug!("Platform package: {} {}", pkg.name, pkg.version);
+        }
         for pkg in platform_packages {
             pool.add_platform_package(pkg);
         }
 
         // Load packages
+        let load_start = std::time::Instant::now();
         let mut loaded_packages: HashSet<String> = HashSet::new();
         let mut pending_packages: Vec<String> = Vec::new();
+        let mut http_request_count = 0usize;
 
         for (name, _) in &composer_json.require {
             if !is_platform_package(name) {
@@ -112,8 +120,12 @@ impl Installer {
                     let name_clone = name.clone();
 
                     spinner.set_message(format!("Loading {}...", name));
+                    http_request_count += 1;
+
                     tasks.spawn(async move {
-                        (name_clone.clone(), rm.find_packages(&name_clone).await)
+                        let start = std::time::Instant::now();
+                        let result = rm.find_packages(&name_clone).await;
+                        (name_clone.clone(), result, start.elapsed())
                     });
                 } else {
                     break;
@@ -126,7 +138,8 @@ impl Installer {
 
             if let Some(res) = tasks.join_next().await {
                 match res {
-                    Ok((_name, packages)) => {
+                    Ok((name, packages, elapsed)) => {
+                        log::trace!("HTTP: {} ({} versions) in {:?}", name, packages.len(), elapsed);
                         for pkg in &packages {
                             for (dep_name, _) in &pkg.require {
                                 if !is_platform_package(dep_name) {
@@ -143,6 +156,9 @@ impl Installer {
                 }
             }
         }
+
+        log::info!("Loaded {} packages ({} HTTP requests) in {:?}",
+            pool.len(), http_request_count, load_start.elapsed());
 
         // Solver Request
         let mut request = Request::new();
@@ -197,6 +213,13 @@ impl Installer {
         let (prod_packages, dev_packages): (Vec<_>, Vec<_>) = packages.iter()
             .partition(|p| non_dev_packages.contains(&p.name.to_lowercase()));
 
+        // Count operations for logging
+        let install_count = packages.len();
+        let update_count = 0; // TODO: track updates vs installs properly
+        let removal_count = 0; // TODO: track removals
+        log::info!("Lock file operations: {} installs, {} updates, {} removals",
+            install_count, update_count, removal_count);
+
         let lock = ComposerLock {
             content_hash: compute_content_hash(composer_json),
             packages: prod_packages.iter().map(|p| package_to_locked(p)).collect(),
@@ -205,6 +228,7 @@ impl Installer {
         };
 
         if !dry_run {
+            log::debug!("Writing lock file");
             let lock_content = serde_json::to_string_pretty(&lock).context("Failed to serialize composer.lock")?;
             std::fs::write(working_dir.join("composer.lock"), lock_content).context("Failed to write composer.lock")?;
         }
@@ -214,6 +238,10 @@ impl Installer {
              println!("{} Lock file updated", style("Success:").green().bold());
              return Ok(0);
         }
+
+        log::debug!("Installing dependencies from lock file");
+        log::info!("Package operations: {} installs, {} updates, {} removals",
+            install_count, update_count, removal_count);
 
         // Install
         let manager = &self.composer.installation_manager;
@@ -226,10 +254,12 @@ impl Installer {
 
         // Report
         for pkg in &result.installed {
+            log::debug!("Installed {} ({})", pkg.name, pkg.version);
             println!("  {} {} ({})", style("-").green(), style(&pkg.name).white().bold(), style(&pkg.version).yellow());
         }
         for (from, to) in &result.updated {
-             println!("  {} {} ({} => {})", style("-").cyan(), style(&to.name).white().bold(), style(&from.version).yellow(), style(&to.version).green());
+            log::debug!("Updated {} ({} => {})", to.name, from.version, to.version);
+            println!("  {} {} ({} => {})", style("-").cyan(), style(&to.name).white().bold(), style(&from.version).yellow(), style(&to.version).green());
         }
 
         // Autoload

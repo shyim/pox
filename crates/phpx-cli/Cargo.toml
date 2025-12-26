@@ -32,3 +32,5 @@ globset = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
 urlencoding = "2"
 terminal_size = "0.4"
+log = "0.4"
+env_logger = "0.11"

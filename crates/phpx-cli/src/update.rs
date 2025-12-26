@@ -99,6 +99,22 @@ pub struct UpdateArgs {
 }
 
 pub async fn execute(args: UpdateArgs) -> Result<i32> {
+    // Initialize logger based on verbosity level
+    // Only enable verbose logging for phpx crates, not dependencies
+    let log_level = match args.verbose {
+        0 => log::LevelFilter::Warn,
+        1 => log::LevelFilter::Info,
+        2 => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Trace,
+    };
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Warn)
+        .filter_module("phpx_pm", log_level)
+        .filter_module("phpx_cli", log_level)
+        .format_timestamp(None)
+        .format_target(false)
+        .init();
+
     let working_dir = args.working_dir.canonicalize()
         .context("Failed to resolve working directory")?;
 

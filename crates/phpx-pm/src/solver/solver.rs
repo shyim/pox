@@ -46,10 +46,22 @@ impl<'a> Solver<'a> {
     ///
     /// Returns a Transaction on success, or a ProblemSet explaining failures.
     pub fn solve(&self, request: &Request) -> Result<Transaction, ProblemSet> {
+        log::debug!("Building pool with {} packages", self.pool.len());
+
         if self.optimize_pool {
+            log::debug!("Running pool optimizer");
+            let opt_start = std::time::Instant::now();
             // Optimize the pool first to reduce the search space
             let mut optimizer = PoolOptimizer::new(self.policy);
             let optimized_pool = optimizer.optimize(request, self.pool);
+            let elapsed = opt_start.elapsed();
+            let original = self.pool.len();
+            let optimized = optimized_pool.len();
+            let removed = original.saturating_sub(optimized);
+            let percent = if original > 0 { (removed * 100) / original } else { 0 };
+            log::info!("Pool optimizer completed in {:.3} seconds", elapsed.as_secs_f64());
+            log::info!("Found {} package versions referenced in dependency graph. {} ({}%) were optimized away",
+                original, removed, percent);
             self.solve_with_pool(&optimized_pool, request)
         } else {
             self.solve_with_pool(self.pool, request)
@@ -58,20 +70,35 @@ impl<'a> Solver<'a> {
 
     /// Internal solve method that works with any pool reference.
     fn solve_with_pool(&self, pool: &Pool, request: &Request) -> Result<Transaction, ProblemSet> {
+        log::debug!("Generating rules");
+        let start = std::time::Instant::now();
+
         // Generate rules from the dependency graph
         let generator = RuleGenerator::new(pool);
         let rules = generator.generate(request);
 
+        log::debug!("Generated {} rules in {:?}", rules.len(), start.elapsed());
+
         // Create solver state
         let mut state = SolverState::new(rules);
+
+        log::debug!("Resolving dependencies through SAT");
+        let sat_start = std::time::Instant::now();
 
         // Run the SAT solver
         match self.run_sat(&mut state, pool, request) {
             Ok(()) => {
+                let elapsed = sat_start.elapsed();
+                log::info!("Dependency resolution completed in {:.3} seconds", elapsed.as_secs_f64());
+                log::info!("Analyzed {} packages to resolve dependencies", pool.len());
+                log::info!("Analyzed {} rules to resolve dependencies", state.rules.len());
                 // Build transaction from decisions
                 Ok(self.build_transaction(&state, pool, request))
             }
-            Err(problems) => Err(problems),
+            Err(problems) => {
+                log::debug!("SAT solving failed in {:?}", sat_start.elapsed());
+                Err(problems)
+            },
         }
     }
 

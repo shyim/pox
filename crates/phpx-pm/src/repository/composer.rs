@@ -156,6 +156,7 @@ impl ComposerRepository {
         {
             let packages = self.packages.read().await;
             if let Some(pkgs) = packages.get(name) {
+                log::trace!("Cache hit (memory): {}", name);
                 return Ok(pkgs.clone());
             }
         }
@@ -171,6 +172,7 @@ impl ComposerRepository {
                 if let Ok(Some(age)) = file_cache.age(&cache_key) {
                     if age < self.cache_ttl {
                         // Cache is fresh, use it directly
+                        log::trace!("Cache hit (file, fresh): {} (age: {:?})", name, age);
                         if let Ok(result) = self.parse_and_cache_response(name, &cached_content).await {
                             return Ok(result);
                         }
@@ -179,15 +181,18 @@ impl ComposerRepository {
 
                 // Cache exists but may be stale - try conditional request
                 if let Some(last_modified) = &metadata.last_modified {
+                    log::debug!("Cache stale, checking: {}", name);
                     match self.fetch_if_modified(&url, last_modified).await {
                         Ok(FetchResult::NotModified) => {
                             // 304 Not Modified - use cached data
+                            log::trace!("Cache valid (304): {}", name);
                             if let Ok(result) = self.parse_and_cache_response(name, &cached_content).await {
                                 return Ok(result);
                             }
                         }
                         Ok(FetchResult::Modified(body, new_metadata)) => {
                             // New data received - update cache
+                            log::debug!("Cache updated: {} ({} bytes)", name, body.len());
                             file_cache.write(&cache_key, body.as_bytes(), &new_metadata).ok();
                             if let Ok(result) = self.parse_and_cache_response(name, body.as_bytes()).await {
                                 return Ok(result);
@@ -195,6 +200,7 @@ impl ComposerRepository {
                         }
                         Err(_) => {
                             // Network error - fall back to cached data
+                            log::debug!("Network error, using stale cache: {}", name);
                             if let Ok(result) = self.parse_and_cache_response(name, &cached_content).await {
                                 return Ok(result);
                             }
@@ -205,6 +211,7 @@ impl ComposerRepository {
         }
 
         // No cache or cache miss - fetch fresh data
+        log::debug!("Cache miss, fetching: {}", name);
         let (body, metadata) = self.fetch_fresh(&url).await?;
 
         // Store in file cache if available
@@ -254,6 +261,9 @@ impl ComposerRepository {
 
     /// Fetch fresh data without conditional headers
     async fn fetch_fresh(&self, url: &str) -> Result<(String, CacheMetadata), String> {
+        log::debug!("HTTP GET {}", url);
+        let start = std::time::Instant::now();
+
         let request = self.client.get(url);
         let request = self.apply_auth(request, url);
         let response = request
@@ -262,6 +272,7 @@ impl ComposerRepository {
             .map_err(|e| format!("Failed to fetch package metadata: {}", e))?;
 
         if !response.status().is_success() {
+            log::debug!("HTTP {} {} in {:?}", response.status().as_u16(), url, start.elapsed());
             // Package not found or other error
             return Ok((String::new(), CacheMetadata::default()));
         }
@@ -275,6 +286,8 @@ impl ComposerRepository {
 
         let body = response.text().await
             .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+        log::debug!("HTTP 200 {} ({} bytes) in {:?}", url, body.len(), start.elapsed());
 
         let metadata = CacheMetadata {
             last_modified,

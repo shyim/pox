@@ -73,6 +73,7 @@ impl DownloadManager {
 
         if let Some(dist) = &package.dist {
             if dist.dist_type == "path" {
+                log::debug!("Installing {} ({}) from path", package.name, package.version);
                 return self.download_from_path(package, dist, &dest_dir).await;
             }
         }
@@ -81,6 +82,8 @@ impl DownloadManager {
 
         if use_source {
             if let Some(source) = &package.source {
+                log::debug!("Installing {} ({}) from source ({})",
+                    package.name, package.version, source.source_type);
                 self.download_from_source(package, source, &dest_dir).await?;
                 return Ok(DownloadResult {
                     path: dest_dir,
@@ -93,6 +96,11 @@ impl DownloadManager {
         // Try dist download
         if let Some(dist) = &package.dist {
             let from_cache = self.download_from_dist(package, dist, &dest_dir).await?;
+            if from_cache {
+                log::debug!("Loading {} ({}) from cache", package.name, package.version);
+            } else {
+                log::debug!("Downloading {} ({})", package.name, package.version);
+            }
             return Ok(DownloadResult {
                 path: dest_dir,
                 from_cache,
@@ -102,6 +110,8 @@ impl DownloadManager {
 
         // Fallback to source if dist not available
         if let Some(source) = &package.source {
+            log::debug!("Installing {} ({}) from source ({})",
+                package.name, package.version, source.source_type);
             self.download_from_source(package, source, &dest_dir).await?;
             return Ok(DownloadResult {
                 path: dest_dir,
