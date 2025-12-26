@@ -9,27 +9,24 @@ on:
 
 jobs:
   build:
-    runs-on: namespace-profile-phpx
     strategy:
       matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
         include:
           - platform: linux/amd64
+            runner: ubuntu-latest
             artifact_name: phpx-linux-amd64
           - platform: linux/arm64
+            runner: ubuntu-24.04-arm
             artifact_name: phpx-linux-arm64
+
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install and configure Namespace CLI
-        uses: namespacelabs/nscloud-setup@v0
-
-      - name: Configure Namespace powered Buildx
-        uses: namespacelabs/nscloud-setup-buildx-action@v0
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build binary
         uses: docker/build-push-action@v6
