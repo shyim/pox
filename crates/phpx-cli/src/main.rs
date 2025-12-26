@@ -765,7 +765,7 @@ fn run() -> Result<i32> {
     eprintln!("  remove          Remove a package from the project");
     eprintln!("  run             Run a script defined in composer.json");
     eprintln!("  server          Start a PHP development server");
-    eprintln!("  pm              Other package manager commands (show, validate, etc.)");
+    eprintln!("  pm              Other package manager commands (dump-autoload, exec, etc.)");
     eprintln!();
     eprintln!("Run 'phpx --help' for more options.");
 

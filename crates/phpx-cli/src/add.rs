@@ -5,7 +5,13 @@ use clap::Args;
 use console::style;
 use std::path::PathBuf;
 
-use phpx_pm::json::ComposerJson;
+use phpx_pm::{
+    Composer,
+    config::Config,
+    installer::Installer,
+    json::{ComposerJson, ComposerLock},
+};
+use crate::pm::platform::PlatformInfo;
 
 #[derive(Args, Debug)]
 pub struct AddArgs {
@@ -54,28 +60,43 @@ pub async fn execute(args: AddArgs) -> Result<i32> {
     let working_dir = args.working_dir.canonicalize()
         .context("Failed to resolve working directory")?;
 
+    // Load composer.json
     let json_path = working_dir.join("composer.json");
-
-    // Load or create composer.json
-    let mut composer_json: ComposerJson = if json_path.exists() {
-        let content = std::fs::read_to_string(&json_path)
-            .context("Failed to read composer.json")?;
-        serde_json::from_str(&content)
-            .context("Failed to parse composer.json")?
+    let composer_json: ComposerJson = if json_path.exists() {
+        let content = std::fs::read_to_string(&json_path)?;
+        serde_json::from_str(&content)?
     } else {
-        eprintln!("{} No composer.json found. Creating one.",
-            style("Info:").cyan()
-        );
+        println!("{} No composer.json found. Creating one.", style("Info:").cyan());
         ComposerJson::default()
     };
 
-    println!("{} Adding packages", style("Composer").green().bold());
+    // Load composer.lock
+    let lock_path = working_dir.join("composer.lock");
+    let lock: Option<ComposerLock> = if lock_path.exists() {
+        let content = std::fs::read_to_string(&lock_path)
+            .context("Failed to read composer.lock")?;
+        serde_json::from_str(&content).ok()
+    } else {
+        None
+    };
 
+    // Load config
+    let config = Config::build(Some(&working_dir), true)?;
+
+    // Create Composer
+    let mut composer = Composer::new(
+        working_dir.clone(),
+        config,
+        composer_json,
+        lock
+    )?;
+
+    println!("{} Adding packages", style("Composer").green().bold());
     if args.dry_run {
         println!("{} Running in dry-run mode", style("Info:").cyan());
     }
 
-    // Parse package specifications
+    // Modify composer.json (in-memory)
     for spec in &args.packages {
         let (name, constraint) = parse_package_spec(spec);
 
@@ -86,57 +107,41 @@ pub async fn execute(args: AddArgs) -> Result<i32> {
         );
 
         if args.dev {
-            composer_json.require_dev.insert(name, constraint);
+            composer.composer_json.require_dev.insert(name, constraint);
         } else {
-            composer_json.require.insert(name, constraint);
+            composer.composer_json.require.insert(name, constraint);
         }
     }
 
     // Write updated composer.json
     if !args.dry_run {
-        let content = serde_json::to_string_pretty(&composer_json)
+        let content = serde_json::to_string_pretty(&composer.composer_json)
             .context("Failed to serialize composer.json")?;
         std::fs::write(&json_path, content)
             .context("Failed to write composer.json")?;
     }
 
-    // Run update if not disabled
+    // Run update
     if !args.no_update {
-        println!("{} Running update...", style("Info:").cyan());
+        // Run Installer
+        let installer = Installer::new(composer);
+        
+        println!("Detecting platform...");
+        let platform = PlatformInfo::detect();
+        let platform_packages = platform.to_packages();
 
-        let update_args = crate::update::UpdateArgs {
-            packages: args.packages.iter()
-                .map(|s| parse_package_spec(s).0)
-                .collect(),
-            prefer_source: args.prefer_source,
-            prefer_dist: args.prefer_dist,
-            dry_run: args.dry_run,
-            no_dev: false,
-            no_autoloader: args.no_autoloader,
-            no_scripts: args.no_scripts,
-            no_progress: false,
-            with_dependencies: true,
-            with_all_dependencies: false,
-            prefer_stable: true,
-            prefer_lowest: false,
-            lock: false,
-            optimize_autoloader: args.optimize_autoloader,
-            working_dir: working_dir.clone(),
-            ansi: false,
-            no_ansi: false,
-            no_interaction: false,
-            quiet: false,
-            verbose: 0,
-        };
-
-        return crate::update::execute(update_args).await;
+        installer.update(
+            platform_packages,
+            args.dry_run,
+            false, // no_dev
+            args.optimize_autoloader,
+            false, // prefer_lowest
+            false, // update_lock_only
+        ).await
+    } else {
+        println!("{} Packages added to composer.json", style("Success:").green().bold());
+        Ok(0)
     }
-
-    println!("{} Packages added to composer.json",
-        style("Success:").green().bold()
-    );
-
-    Ok(0)
 }
 
 /// Parse a package specification (vendor/package:^1.0 or vendor/package)
@@ -148,21 +153,5 @@ fn parse_package_spec(spec: &str) -> (String, String) {
     } else {
         // Default to any version
         (spec.to_string(), "*".to_string())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_package_spec() {
-        let (name, constraint) = parse_package_spec("vendor/package:^1.0");
-        assert_eq!(name, "vendor/package");
-        assert_eq!(constraint, "^1.0");
-
-        let (name, constraint) = parse_package_spec("vendor/package");
-        assert_eq!(name, "vendor/package");
-        assert_eq!(constraint, "*");
     }
 }

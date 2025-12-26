@@ -437,6 +437,8 @@ impl Repository for ArtifactRepository {
                 description: p.description.clone(),
                 url: None,
                 abandoned: None,
+                downloads: None,
+                favers: None,
             })
             .collect()
     }

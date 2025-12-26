@@ -31,6 +31,10 @@ pub struct SearchResult {
     pub url: Option<String>,
     /// Abandonment notice
     pub abandoned: Option<String>,
+    /// Number of downloads
+    pub downloads: Option<u64>,
+    /// Number of favorites/stars
+    pub favers: Option<u64>,
 }
 
 /// Provider information for virtual packages

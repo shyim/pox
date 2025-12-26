@@ -118,6 +118,8 @@ impl Repository for InstalledRepository {
                 description: p.description.clone(),
                 url: None,
                 abandoned: None,
+                downloads: None,
+                favers: None,
             })
             .collect()
     }

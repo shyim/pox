@@ -211,6 +211,8 @@ impl Repository for PlatformRepository {
                 description: p.description.clone(),
                 url: None,
                 abandoned: None,
+                downloads: None,
+                favers: None,
             })
             .collect()
     }

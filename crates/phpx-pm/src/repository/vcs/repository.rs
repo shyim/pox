@@ -348,6 +348,8 @@ impl Repository for VcsRepository {
                 description: p.description.clone(),
                 url: Some(self.url.clone()),
                 abandoned: None,
+                downloads: None,
+                favers: None,
             })
             .collect()
     }

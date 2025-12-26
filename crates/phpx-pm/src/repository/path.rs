@@ -327,6 +327,8 @@ impl Repository for PathRepository {
                 description: p.description.clone(),
                 url: None,
                 abandoned: None,
+                downloads: None,
+                favers: None,
             })
             .collect()
     }

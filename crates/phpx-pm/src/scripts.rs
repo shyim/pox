@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use phpx_pm::json::ComposerJson;
+use crate::json::ComposerJson;
 
 /// Default process timeout in seconds (same as Composer)
 const DEFAULT_PROCESS_TIMEOUT: u64 = 300;
@@ -72,7 +72,7 @@ pub fn collect_scripts(composer_json: &ComposerJson) -> HashMap<&str, Vec<String
     ];
 
     for (name, value) in events {
-        let cmds = value.as_vec();
+        let cmds: Vec<String> = value.as_vec();
         if !cmds.is_empty() {
             scripts.insert(name, cmds);
         }
@@ -80,7 +80,7 @@ pub fn collect_scripts(composer_json: &ComposerJson) -> HashMap<&str, Vec<String
 
     // Add custom scripts
     for (name, value) in &composer_json.scripts.custom {
-        let cmds = value.as_vec();
+        let cmds: Vec<String> = value.as_vec();
         if !cmds.is_empty() {
             scripts.insert(name.as_str(), cmds);
         }

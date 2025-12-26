@@ -5,7 +5,13 @@ use clap::Args;
 use console::style;
 use std::path::PathBuf;
 
-use phpx_pm::json::ComposerJson;
+use phpx_pm::{
+    Composer,
+    config::Config,
+    installer::Installer,
+    json::{ComposerJson, ComposerLock},
+};
+use crate::pm::platform::PlatformInfo;
 
 #[derive(Args, Debug)]
 pub struct RemoveArgs {
@@ -47,7 +53,6 @@ pub async fn execute(args: RemoveArgs) -> Result<i32> {
         .context("Failed to resolve working directory")?;
 
     let json_path = working_dir.join("composer.json");
-
     if !json_path.exists() {
         eprintln!("{} No composer.json found in {}",
             style("Error:").red().bold(),
@@ -57,13 +62,31 @@ pub async fn execute(args: RemoveArgs) -> Result<i32> {
     }
 
     // Load composer.json
-    let content = std::fs::read_to_string(&json_path)
-        .context("Failed to read composer.json")?;
-    let mut composer_json: ComposerJson = serde_json::from_str(&content)
-        .context("Failed to parse composer.json")?;
+    let content = std::fs::read_to_string(&json_path)?;
+    let composer_json: ComposerJson = serde_json::from_str(&content)?;
+
+    // Load composer.lock
+    let lock_path = working_dir.join("composer.lock");
+    let lock: Option<ComposerLock> = if lock_path.exists() {
+        let content = std::fs::read_to_string(&lock_path)
+            .context("Failed to read composer.lock")?;
+        serde_json::from_str(&content).ok()
+    } else {
+        None
+    };
+
+    // Load config
+    let config = Config::build(Some(&working_dir), true)?;
+
+    // Create Composer
+    let mut composer = Composer::new(
+        working_dir.clone(),
+        config,
+        composer_json,
+        lock
+    )?;
 
     println!("{} Removing packages", style("Composer").green().bold());
-
     if args.dry_run {
         println!("{} Running in dry-run mode", style("Info:").cyan());
     }
@@ -72,8 +95,8 @@ pub async fn execute(args: RemoveArgs) -> Result<i32> {
 
     for name in &args.packages {
         // Try to remove from require or require-dev
-        let was_in_require = composer_json.require.remove(name).is_some();
-        let was_in_dev = composer_json.require_dev.remove(name).is_some();
+        let was_in_require = composer.composer_json.require.remove(name).is_some();
+        let was_in_dev = composer.composer_json.require_dev.remove(name).is_some();
 
         if was_in_require || was_in_dev {
             println!("  {} {}",
@@ -96,46 +119,33 @@ pub async fn execute(args: RemoveArgs) -> Result<i32> {
 
     // Write updated composer.json
     if !args.dry_run {
-        let content = serde_json::to_string_pretty(&composer_json)
+        let content = serde_json::to_string_pretty(&composer.composer_json)
             .context("Failed to serialize composer.json")?;
         std::fs::write(&json_path, content)
             .context("Failed to write composer.json")?;
     }
 
-    // Run update to regenerate lock file and remove packages
+    // Run update
     if !args.no_update {
-        println!("{} Running update...", style("Info:").cyan());
+        let installer = Installer::new(composer);
+        
+        println!("Detecting platform...");
+        let platform = PlatformInfo::detect();
+        let platform_packages = platform.to_packages();
 
-        let update_args = super::update::UpdateArgs {
-            packages: vec![],
-            prefer_source: false,
-            prefer_dist: true,
-            dry_run: args.dry_run,
-            no_dev: false,
-            no_autoloader: args.no_autoloader,
-            no_scripts: args.no_scripts,
-            no_progress: false,
-            with_dependencies: false,
-            with_all_dependencies: false,
-            prefer_stable: true,
-            prefer_lowest: false,
-            lock: false,
-            optimize_autoloader: args.optimize_autoloader,
-            working_dir: working_dir.clone(),
-            ansi: false,
-            no_ansi: false,
-            no_interaction: false,
-            quiet: false,
-            verbose: 0,
-        };
-
-        return super::update::execute(update_args).await;
+        installer.update(
+            platform_packages,
+            args.dry_run,
+            false, // no_dev
+            args.optimize_autoloader,
+            false, // prefer_lowest
+            false, // update_lock_only
+        ).await
+    } else {
+        println!("{} {} packages removed from composer.json",
+            style("Success:").green().bold(),
+            removed.len()
+        );
+        Ok(0)
     }
-
-    println!("{} {} packages removed from composer.json",
-        style("Success:").green().bold(),
-        removed.len()
-    );
-
-    Ok(0)
 }

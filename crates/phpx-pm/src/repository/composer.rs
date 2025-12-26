@@ -149,6 +149,9 @@ impl ComposerRepository {
 
     /// Load package metadata from the Packagist v2 API with caching
     async fn load_package_metadata(&self, name: &str) -> Result<Vec<Arc<Package>>, String> {
+        let name_lower = name.to_lowercase();
+        let name = name_lower.as_str();
+
         // Check in-memory cache first
         {
             let packages = self.packages.read().await;
@@ -251,6 +254,7 @@ impl ComposerRepository {
 
     /// Fetch fresh data without conditional headers
     async fn fetch_fresh(&self, url: &str) -> Result<(String, CacheMetadata), String> {
+        eprintln!("[DEBUG] Fetching URL: {}", url);
         let request = self.client.get(url);
         let request = self.apply_auth(request, url);
         let response = request
@@ -259,6 +263,7 @@ impl ComposerRepository {
             .map_err(|e| format!("Failed to fetch package metadata: {}", e))?;
 
         if !response.status().is_success() {
+            eprintln!("[DEBUG] HTTP error {}: {}", response.status(), url);
             // Package not found or other error
             return Ok((String::new(), CacheMetadata::default()));
         }
@@ -272,6 +277,8 @@ impl ComposerRepository {
 
         let body = response.text().await
             .map_err(|e| format!("Failed to read response body: {}", e))?;
+        
+        eprintln!("[DEBUG] Fetched {} bytes for {}", body.len(), url);
 
         let metadata = CacheMetadata {
             last_modified,
@@ -284,6 +291,7 @@ impl ComposerRepository {
     /// Parse response body and cache in memory
     async fn parse_and_cache_response(&self, name: &str, body: &[u8]) -> Result<Vec<Arc<Package>>, String> {
         if body.is_empty() {
+            eprintln!("[DEBUG] Empty body for {}", name);
             return Ok(Vec::new());
         }
 
@@ -301,6 +309,8 @@ impl ComposerRepository {
                 let pkg = self.convert_to_package(name, version_data, base.as_ref());
                 result.push(Arc::new(pkg));
             }
+        } else {
+             eprintln!("[DEBUG] Package {} not found in response. Available keys: {:?}", name, data.packages.keys());
         }
 
         // Cache the results in memory
@@ -539,11 +549,21 @@ impl Repository for ComposerRepository {
             Err(_) => return Vec::new(),
         };
 
-        data.results.into_iter().map(|r| SearchResult {
-            name: r.name,
-            description: r.description,
-            url: r.url,
-            abandoned: None,
+        data.results.into_iter().map(|r| {
+            let abandoned = match r.abandoned {
+                Some(Value::Bool(true)) => Some("".to_string()),
+                Some(Value::String(s)) => Some(s),
+                _ => None,
+            };
+
+            SearchResult {
+                name: r.name,
+                description: r.description,
+                url: r.url,
+                abandoned,
+                downloads: r.downloads,
+                favers: r.favers,
+            }
         }).collect()
     }
 
@@ -692,4 +712,7 @@ struct SearchResultItem {
     name: String,
     description: Option<String>,
     url: Option<String>,
+    downloads: Option<u64>,
+    favers: Option<u64>,
+    abandoned: Option<Value>,
 }

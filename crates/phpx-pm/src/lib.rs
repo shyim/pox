@@ -1,5 +1,6 @@
 pub mod autoload;
 pub mod cache;
+pub mod composer;
 pub mod config;
 pub mod downloader;
 pub mod error;
@@ -20,3 +21,5 @@ pub use downloader::{DownloadManager, DownloadResult};
 pub use installer::{InstallationManager, InstallConfig};
 pub use autoload::{AutoloadGenerator, AutoloadConfig};
 pub use plugin::PluginRegistry;
+pub use composer::Composer;
+pub mod scripts;

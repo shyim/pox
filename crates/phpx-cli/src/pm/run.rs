@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use phpx_pm::json::ComposerJson;
 
-use super::scripts;
+use phpx_pm::scripts;
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
