@@ -184,8 +184,9 @@ impl ComposerRepository {
                     log::debug!("Cache stale, checking: {}", name);
                     match self.fetch_if_modified(&url, last_modified).await {
                         Ok(FetchResult::NotModified) => {
-                            // 304 Not Modified - use cached data
+                            // 304 Not Modified - touch cache to reset TTL
                             log::trace!("Cache valid (304): {}", name);
+                            file_cache.write(&cache_key, &cached_content, &metadata).ok();
                             if let Ok(result) = self.parse_and_cache_response(name, &cached_content).await {
                                 return Ok(result);
                             }
