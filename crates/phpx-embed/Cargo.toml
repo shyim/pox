@@ -9,9 +9,11 @@ build = "build.rs"
 [features]
 default = []
 static = []  # Force static linking against libphp.a
+dynamic-loader = ["libloading"]  # Enable dynamic library loading
 
 [dependencies]
 thiserror = "2"
+libloading = { version = "0.8", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

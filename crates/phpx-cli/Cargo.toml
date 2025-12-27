@@ -31,6 +31,7 @@ notify-debouncer-full = "0.5"
 globset = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
 urlencoding = "2"
+dirs = "5"
 terminal_size = "0.4"
 log = "0.4"
 env_logger = "0.11"

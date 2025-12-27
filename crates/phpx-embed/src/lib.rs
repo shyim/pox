@@ -51,6 +51,21 @@
 //!
 //! Static linking will automatically include all PHP dependencies (libxml2, openssl,
 //! zlib, etc.) that PHP was compiled with.
+//!
+//! ## Dynamic Version Loading
+//!
+//! The `dynamic-loader` feature enables runtime loading of different PHP versions.
+//! This allows switching PHP versions without recompiling:
+//!
+//! ```bash
+//! cargo build --features dynamic-loader
+//! ```
+//!
+//! With this feature, you can load PHP runtime libraries at runtime using
+//! [`loader::DynamicPhpRuntime`].
+
+#[cfg(feature = "dynamic-loader")]
+pub mod loader;
 
 use std::ffi::{CStr, CString, NulError};
 use std::os::raw::{c_char, c_int, c_void};

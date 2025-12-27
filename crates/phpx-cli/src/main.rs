@@ -5,6 +5,7 @@ mod init;
 mod install;
 mod remove;
 mod update;
+mod version_manager;
 
 use config::PhpxConfig;
 

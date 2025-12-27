@@ -18,6 +18,10 @@ pub struct PhpxConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct PhpConfig {
+    /// PHP version requirement (e.g., "8.3", "^8.2", "8.3.15")
+    /// If not specified, uses the embedded/default version
+    pub version: Option<String>,
+
     /// PHP INI settings (e.g., memory_limit = "256M")
     #[serde(default)]
     pub ini: HashMap<String, String>,
@@ -115,6 +119,30 @@ display_errors = "On"
         assert_eq!(config.php.ini.get("memory_limit"), Some(&"256M".to_string()));
         assert_eq!(config.php.ini.get("max_execution_time"), Some(&"30".to_string()));
         assert_eq!(config.php.ini.get("display_errors"), Some(&"On".to_string()));
+    }
+
+    #[test]
+    fn test_parse_php_version() {
+        let toml = r#"
+[php]
+version = "8.3"
+
+[php.ini]
+memory_limit = "256M"
+"#;
+        let config: PhpxConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.php.version, Some("8.3".to_string()));
+        assert_eq!(config.php.ini.get("memory_limit"), Some(&"256M".to_string()));
+    }
+
+    #[test]
+    fn test_parse_php_version_constraint() {
+        let toml = r#"
+[php]
+version = "^8.2"
+"#;
+        let config: PhpxConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.php.version, Some("^8.2".to_string()));
     }
 
     #[test]
