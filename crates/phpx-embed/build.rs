@@ -40,10 +40,9 @@ fn main() {
         build.flag("-Wno-deprecated-declarations");
     }
 
-    // On musl libc (Alpine), we need _GNU_SOURCE to get memrchr and mempcpy
-    // which PHP headers use
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-    if target_env == "musl" {
+    // On Linux, we need _GNU_SOURCE to get memrchr and mempcpy
+    // which PHP headers use (GNU extensions in string.h)
+    if target_os == "linux" {
         build.define("_GNU_SOURCE", None);
     }
 
