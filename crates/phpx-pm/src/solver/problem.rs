@@ -21,8 +21,10 @@ pub struct ProblemRule {
     pub rule_id: u32,
     /// Rule type
     pub rule_type: RuleType,
-    /// Source package ID
+    /// Source package ID (deprecated, use source_name instead)
     pub source: Option<PackageId>,
+    /// Source package name and version (resolved at problem creation time)
+    pub source_name: Option<String>,
     /// Target package name
     pub target: Option<String>,
     /// Constraint
@@ -38,12 +40,29 @@ impl Problem {
         }
     }
 
-    /// Add a rule to this problem
+    /// Add a rule to this problem (without resolving source package name)
     pub fn add_rule(&mut self, rule: &Rule) {
         self.rules.push(ProblemRule {
             rule_id: rule.id(),
             rule_type: rule.rule_type(),
             source: rule.source_package(),
+            source_name: None,
+            target: rule.target_name().map(String::from),
+            constraint: rule.constraint().map(String::from),
+        });
+    }
+
+    /// Add a rule to this problem, resolving source package name from the pool
+    pub fn add_rule_with_pool(&mut self, rule: &Rule, pool: &Pool) {
+        let source_name = rule.source_package()
+            .and_then(|id| pool.package(id))
+            .map(|p| p.pretty_string());
+
+        self.rules.push(ProblemRule {
+            rule_id: rule.id(),
+            rule_type: rule.rule_type(),
+            source: rule.source_package(),
+            source_name,
             target: rule.target_name().map(String::from),
             constraint: rule.constraint().map(String::from),
         });
@@ -80,38 +99,48 @@ impl Default for Problem {
     }
 }
 
+/// Helper to get source package name - prefer pre-resolved name, fall back to pool lookup
+fn get_source_name(rule: &ProblemRule, pool: &Pool) -> String {
+    rule.source_name.clone().unwrap_or_else(|| {
+        rule.source
+            .and_then(|id| pool.package(id))
+            .map(|p| p.pretty_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    })
+}
+
 /// Describe a problem rule in human-readable form
 fn describe_rule(pool: &Pool, rule: &ProblemRule) -> String {
     match rule.rule_type {
         RuleType::RootRequire => {
             let target = rule.target.as_deref().unwrap_or("unknown");
             let constraint = rule.constraint.as_deref().unwrap_or("*");
-            format!(
-                "Root composer.json requires {} {}, but no matching package was found",
-                target, constraint
-            )
+            // Check if any packages exist for this requirement
+            let has_packages = !pool.packages_by_name(target).is_empty();
+            if has_packages {
+                format!(
+                    "Root composer.json requires {} {}, but no version satisfying the constraint can be installed",
+                    target, constraint
+                )
+            } else {
+                format!(
+                    "Root composer.json requires {} {}, but no matching package was found",
+                    target, constraint
+                )
+            }
         }
         RuleType::Fixed => {
-            let source = rule.source
-                .and_then(|id| pool.package(id))
-                .map(|p| p.pretty_string())
-                .unwrap_or_else(|| "unknown".to_string());
+            let source = get_source_name(rule, pool);
             format!("{} is fixed and cannot be changed", source)
         }
         RuleType::PackageRequires => {
-            let source = rule.source
-                .and_then(|id| pool.package(id))
-                .map(|p| p.pretty_string())
-                .unwrap_or_else(|| "unknown".to_string());
+            let source = get_source_name(rule, pool);
             let target = rule.target.as_deref().unwrap_or("unknown");
             let constraint = rule.constraint.as_deref().unwrap_or("*");
             format!("{} requires {} {}", source, target, constraint)
         }
         RuleType::PackageConflict => {
-            let source = rule.source
-                .and_then(|id| pool.package(id))
-                .map(|p| p.pretty_string())
-                .unwrap_or_else(|| "unknown".to_string());
+            let source = get_source_name(rule, pool);
             let target = rule.target.as_deref().unwrap_or("unknown");
             format!("{} conflicts with {}", source, target)
         }

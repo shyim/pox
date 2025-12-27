@@ -103,6 +103,16 @@ mod tests {
     }
 
     #[test]
+    fn test_is_platform_package_phpunit_packages() {
+        assert!(!is_platform_package("phpunit/phpunit"));
+        assert!(!is_platform_package("phpunit/php-code-coverage"));
+        assert!(!is_platform_package("phpunit/php-file-iterator"));
+        assert!(!is_platform_package("phpunit/php-text-template"));
+        assert!(!is_platform_package("phpunit/php-timer"));
+        assert!(!is_platform_package("phpunit/php-invoker"));
+    }
+
+    #[test]
     fn test_is_platform_package_case_sensitivity() {
         // Platform package names are case-sensitive (lowercase)
         // These should NOT match as platform packages

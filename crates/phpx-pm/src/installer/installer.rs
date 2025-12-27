@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use std::time::Duration;
 use anyhow::{Context, Result};
 use console::style;
@@ -6,8 +7,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tokio::task::JoinSet;
 
 use crate::composer::Composer;
-use crate::json::{ComposerLock, LockedPackage, LockSource, LockDist, LockAutoload};
-use crate::package::{Package, Stability, Autoload, AutoloadPath};
+use crate::json::{ComposerLock, ComposerJson, LockedPackage, LockSource, LockDist, LockAutoload};
+use crate::package::{Package, Stability, Autoload, AutoloadPath, detect_root_version, RootVersion};
 use crate::solver::{Pool, Policy, Request, Solver};
 use crate::autoload::{AutoloadConfig, AutoloadGenerator, PackageAutoload, RootPackageInfo, get_head_commit};
 use crate::plugin::PluginRegistry;
@@ -60,8 +61,48 @@ impl Installer {
 
         log::debug!("Minimum stability: {:?}", minimum_stability);
 
+        // Detect root package version
+        let root_version = get_root_version(working_dir, composer_json);
+
         // Build package pool
         let mut pool = Pool::with_minimum_stability(minimum_stability);
+
+        // Add root package to pool (for replace/provide/conflict handling)
+        // Use add_platform_package to bypass stability filtering (root is always installed)
+        let root_pkg = create_root_package(composer_json, &root_version);
+        if !root_pkg.replace.is_empty() || !root_pkg.provide.is_empty() {
+            log::debug!(
+                "Root package version: {} (normalized: {})",
+                root_pkg.pretty_version.as_deref().unwrap_or("N/A"),
+                root_pkg.version
+            );
+            log::debug!(
+                "Root package replaces: {:?}",
+                root_pkg.replace
+            );
+            log::debug!(
+                "Root package provides: {:?}",
+                root_pkg.provide
+            );
+            let root_id = pool.add_platform_package(root_pkg);
+            log::debug!("Added root package to pool with id {}", root_id);
+        }
+
+        // Collect packages that are replaced/provided by root - we don't need to load these
+        // from repositories since the root package satisfies them
+        let root_replaced: HashSet<String> = composer_json
+            .replace
+            .keys()
+            .chain(composer_json.provide.keys())
+            .map(|s| s.to_lowercase())
+            .collect();
+
+        if !root_replaced.is_empty() {
+            log::debug!(
+                "Skipping repository lookup for root-replaced packages: {:?}",
+                root_replaced
+            );
+        }
 
         // Add stability flags
         for (name, constraint) in &composer_json.require {
@@ -85,21 +126,37 @@ impl Installer {
             pool.add_platform_package(pkg);
         }
 
-        // Load packages
+        // Load packages with constraint-based filtering
+        // This dramatically reduces the pool size by only loading versions that could
+        // possibly be selected, similar to PHP Composer's demand-driven loading.
         let load_start = std::time::Instant::now();
-        let mut loaded_packages: HashSet<String> = HashSet::new();
-        let mut pending_packages: Vec<String> = Vec::new();
+
+        // Track loaded packages and pending packages with their constraints
+        // Key = lowercase package name, Value = merged constraint string
+        let mut loaded_packages: HashSet<String> = root_replaced.clone();
+        let mut pending_packages: HashMap<String, String> = HashMap::new();
         let mut http_request_count = 0usize;
 
-        for (name, _) in &composer_json.require {
-            if !is_platform_package(name) {
-                pending_packages.push(name.clone());
+        // Collect all packages first, then sort and add to pool for deterministic order
+        let mut all_packages: Vec<Arc<Package>> = Vec::new();
+
+        // Add root requirements with their constraints
+        for (name, constraint) in &composer_json.require {
+            if !is_platform_package(name) && !root_replaced.contains(&name.to_lowercase()) {
+                let name_lower = name.to_lowercase();
+                pending_packages.insert(name_lower, constraint.clone());
             }
         }
         if !no_dev {
-            for (name, _) in &composer_json.require_dev {
-                if !is_platform_package(name) {
-                    pending_packages.push(name.clone());
+            for (name, constraint) in &composer_json.require_dev {
+                if !is_platform_package(name) && !root_replaced.contains(&name.to_lowercase()) {
+                    let name_lower = name.to_lowercase();
+                    // Merge constraints if already present
+                    if let Some(existing) = pending_packages.get(&name_lower) {
+                        pending_packages.insert(name_lower, format!("{} || {}", existing, constraint));
+                    } else {
+                        pending_packages.insert(name_lower, constraint.clone());
+                    }
                 }
             }
         }
@@ -108,48 +165,71 @@ impl Installer {
         const MAX_CONCURRENT_REQUESTS: usize = 50;
 
         loop {
+            // Get pending packages sorted for deterministic processing
+            let mut pending_list: Vec<(String, String)> = pending_packages.drain().collect();
+            pending_list.sort_by(|a, b| a.0.cmp(&b.0));
+
             while tasks.len() < MAX_CONCURRENT_REQUESTS {
-                if let Some(name) = pending_packages.pop() {
-                    let name_lower = name.to_lowercase();
-                    if loaded_packages.contains(&name_lower) {
+                if let Some((name, constraint)) = pending_list.pop() {
+                    if loaded_packages.contains(&name) {
                         continue;
                     }
-                    loaded_packages.insert(name_lower);
+                    loaded_packages.insert(name.clone());
 
                     let rm = repo_manager.clone();
                     let name_clone = name.clone();
+                    let constraint_clone = constraint.clone();
 
                     spinner.set_message(format!("Loading {}...", name));
                     http_request_count += 1;
 
                     tasks.spawn(async move {
                         let start = std::time::Instant::now();
-                        let result = rm.find_packages(&name_clone).await;
-                        (name_clone.clone(), result, start.elapsed())
+                        // Use constraint-based loading when available
+                        let result = rm.find_packages_with_constraint(&name_clone, &constraint_clone).await;
+                        (name_clone.clone(), constraint_clone, result, start.elapsed())
                     });
                 } else {
                     break;
                 }
             }
 
-            if tasks.is_empty() {
+            // Put remaining items back
+            for (name, constraint) in pending_list {
+                pending_packages.insert(name, constraint);
+            }
+
+            if tasks.is_empty() && pending_packages.is_empty() {
                 break;
             }
 
             if let Some(res) = tasks.join_next().await {
                 match res {
-                    Ok((name, packages, elapsed)) => {
+                    Ok((name, _constraint, packages, elapsed)) => {
                         log::trace!("HTTP: {} ({} versions) in {:?}", name, packages.len(), elapsed);
                         for pkg in &packages {
-                            for (dep_name, _) in &pkg.require {
+                            // Add dependencies with their constraints
+                            for (dep_name, dep_constraint) in &pkg.require {
                                 if !is_platform_package(dep_name) {
                                     let dep_lower = dep_name.to_lowercase();
                                     if !loaded_packages.contains(&dep_lower) {
-                                        pending_packages.push(dep_name.clone());
+                                        // Merge constraint if already pending
+                                        if let Some(existing) = pending_packages.get(&dep_lower) {
+                                            // Only extend if the new constraint isn't a subset
+                                            // For simplicity, just merge with OR
+                                            pending_packages.insert(
+                                                dep_lower,
+                                                format!("{} || {}", existing, dep_constraint),
+                                            );
+                                        } else {
+                                            log::trace!("Adding dependency {} {} from {} {}", dep_name, dep_constraint, pkg.name, pkg.version);
+                                            pending_packages.insert(dep_lower, dep_constraint.clone());
+                                        }
                                     }
                                 }
                             }
-                            pool.add_package_arc(pkg.clone(), None);
+                            // Collect packages instead of adding directly to pool
+                            all_packages.push(pkg.clone());
                         }
                     }
                     Err(e) => eprintln!("Warning: Task failed: {}", e),
@@ -157,8 +237,22 @@ impl Installer {
             }
         }
 
+        // Sort packages by name and version for deterministic pool order
+        all_packages.sort_by(|a, b| {
+            match a.name.cmp(&b.name) {
+                std::cmp::Ordering::Equal => a.version.cmp(&b.version),
+                other => other,
+            }
+        });
+
+        // Add sorted packages to pool
+        for pkg in all_packages {
+            pool.add_package_arc(pkg, None);
+        }
+
         log::info!("Loaded {} packages ({} HTTP requests) in {:?}",
             pool.len(), http_request_count, load_start.elapsed());
+        log::debug!("Pool has {} packages after loading", pool.len());
 
         // Solver Request
         let mut request = Request::new();
@@ -173,6 +267,14 @@ impl Installer {
                     request.require(name, constraint);
                 }
             }
+        }
+
+        // Add root package as fixed if it has replace/provide
+        // This ensures the solver knows the root package is always installed
+        // and its replaced/provided packages are available
+        let root_pkg = create_root_package(composer_json, &root_version);
+        if !root_pkg.replace.is_empty() || !root_pkg.provide.is_empty() {
+            request.fix(root_pkg);
         }
 
         let policy = Policy::new().prefer_lowest(prefer_lowest);
@@ -289,19 +391,16 @@ impl Installer {
              };
 
              let generator = AutoloadGenerator::new(autoload_config);
-             
+
              let root_autoload: Option<Autoload> = Some(composer_json.autoload.clone().into());
 
-             let reference = get_head_commit(working_dir);
-             let root_package = RootPackageInfo {
-                 name: composer_json.name.clone().unwrap_or_else(|| "__root__".to_string()),
-                 pretty_version: composer_json.version.clone().unwrap_or_else(|| "dev-main".to_string()),
-                 version: composer_json.version.clone().unwrap_or_else(|| "dev-main".to_string()),
-                 reference,
-                 package_type: composer_json.package_type.clone(),
-                 aliases: Vec::new(),
+             let root_package = create_root_package_info(
+                 composer_json,
+                 &root_version,
+                 working_dir,
+                 Vec::new(),
                  dev_mode,
-             };
+             );
 
              generator.generate(&package_autoloads, root_autoload.as_ref(), Some(&root_package))
                  .context("Failed to generate autoloader")?;
@@ -325,6 +424,9 @@ impl Installer {
         let composer_json = &self.composer.composer_json;
         let working_dir = &self.composer.working_dir;
         let lock = self.composer.composer_lock.as_ref().context("No composer.lock file found")?;
+
+        // Detect root package version
+        let root_version = get_root_version(working_dir, composer_json);
 
         // Run pre-install-cmd script
         if !no_scripts {
@@ -393,16 +495,18 @@ impl Installer {
              let generator = AutoloadGenerator::new(autoload_config);
              // Root autoload from json
              let root_autoload: Option<Autoload> = Some(composer_json.autoload.clone().into());
-             let root_package = RootPackageInfo {
-                 name: composer_json.name.clone().unwrap_or_else(|| "__root__".to_string()),
-                 pretty_version: composer_json.version.clone().unwrap_or_else(|| "dev-main".to_string()),
-                 version: composer_json.version.clone().unwrap_or_else(|| "dev-main".to_string()),
-                 reference: get_head_commit(working_dir),
-                 package_type: composer_json.package_type.clone(),
-                 aliases: aliases_map.get(&composer_json.name.clone().unwrap_or_default()).cloned().unwrap_or_default(),
-                 dev_mode
-             };
-             
+             let root_aliases = aliases_map
+                 .get(&composer_json.name.clone().unwrap_or_default())
+                 .cloned()
+                 .unwrap_or_default();
+             let root_package = create_root_package_info(
+                 composer_json,
+                 &root_version,
+                 working_dir,
+                 root_aliases,
+                 dev_mode,
+             );
+
              generator.generate(&package_autoloads, root_autoload.as_ref(), Some(&root_package)).context("Failed to generate autoloader")?;
 
              // Plugins
@@ -435,6 +539,9 @@ impl Installer {
         let composer_json = &self.composer.composer_json;
         let working_dir = &self.composer.working_dir;
         let manager = &self.composer.installation_manager;
+
+        // Detect root package version
+        let root_version = get_root_version(working_dir, composer_json);
 
         println!("{} Generating autoload files", style("Info:").cyan());
             
@@ -479,16 +586,18 @@ impl Installer {
         let generator = AutoloadGenerator::new(autoload_config);
         // Root autoload from json
         let root_autoload: Option<Autoload> = Some(composer_json.autoload.clone().into());
-        let root_package = RootPackageInfo {
-            name: composer_json.name.clone().unwrap_or_else(|| "__root__".to_string()),
-            pretty_version: composer_json.version.clone().unwrap_or_else(|| "dev-main".to_string()),
-            version: composer_json.version.clone().unwrap_or_else(|| "dev-main".to_string()),
-            reference: get_head_commit(working_dir),
-            package_type: composer_json.package_type.clone(),
-            aliases: aliases_map.get(&composer_json.name.clone().unwrap_or_default()).cloned().unwrap_or_default(),
-            dev_mode
-        };
-        
+        let root_aliases = aliases_map
+            .get(&composer_json.name.clone().unwrap_or_default())
+            .cloned()
+            .unwrap_or_default();
+        let root_package = create_root_package_info(
+            composer_json,
+            &root_version,
+            working_dir,
+            root_aliases,
+            dev_mode,
+        );
+
         generator.generate(&package_autoloads, root_autoload.as_ref(), Some(&root_package)).context("Failed to generate autoloader")?;
 
         // Plugins
@@ -511,6 +620,77 @@ impl Installer {
 }
 
 // Helpers
+
+/// Detects and returns the root package version with logging.
+///
+/// This handles:
+/// 1. COMPOSER_ROOT_VERSION environment variable
+/// 2. Explicit version in composer.json
+/// 3. Branch alias matching current git branch
+/// 4. Git branch name as dev version
+fn get_root_version(working_dir: &std::path::Path, composer_json: &ComposerJson) -> RootVersion {
+    let branch_aliases = composer_json.get_branch_aliases();
+    let root_version = detect_root_version(
+        working_dir,
+        composer_json.version.as_deref(),
+        &branch_aliases,
+    );
+
+    log::info!(
+        "Root package version: {} (from {})",
+        root_version.pretty_version,
+        root_version.source
+    );
+
+    root_version
+}
+
+/// Creates a root package that can be added to the solver pool.
+///
+/// This creates a Package with the root's replace/provide/conflict declarations
+/// so the solver knows what virtual packages the root provides.
+fn create_root_package(composer_json: &ComposerJson, root_version: &RootVersion) -> Package {
+    let name = composer_json
+        .name
+        .clone()
+        .unwrap_or_else(|| "__root__".to_string());
+
+    let mut pkg = Package::new(&name, &root_version.version);
+    pkg.pretty_version = Some(root_version.pretty_version.clone());
+    pkg.package_type = composer_json.package_type.clone();
+
+    // Copy replace/provide/conflict from composer.json
+    pkg.replace = composer_json.replace.clone();
+    pkg.provide = composer_json.provide.clone();
+    pkg.conflict = composer_json.conflict.clone();
+
+    // Replace self.version with the actual root version
+    pkg.replace_self_version();
+
+    pkg
+}
+
+/// Creates a RootPackageInfo for autoload generation.
+fn create_root_package_info(
+    composer_json: &ComposerJson,
+    root_version: &RootVersion,
+    working_dir: &std::path::Path,
+    aliases: Vec<String>,
+    dev_mode: bool,
+) -> RootPackageInfo {
+    RootPackageInfo {
+        name: composer_json
+            .name
+            .clone()
+            .unwrap_or_else(|| "__root__".to_string()),
+        pretty_version: root_version.pretty_version.clone(),
+        version: root_version.version.clone(),
+        reference: get_head_commit(working_dir),
+        package_type: composer_json.package_type.clone(),
+        aliases,
+        dev_mode,
+    }
+}
 
 fn locked_package_to_package(lp: &LockedPackage) -> Package {
     let mut pkg = Package::new(&lp.name, &lp.version);
@@ -666,7 +846,7 @@ fn package_to_locked(pkg: &Package) -> LockedPackage {
     
     LockedPackage {
         name: pkg.name.clone(),
-        version: pkg.version.clone(),
+        version: pkg.pretty_version().to_string(),
         source: pkg.source.as_ref().map(|s| LockSource { source_type: s.source_type.clone(), url: s.url.clone(), reference: s.reference.clone() }),
         dist: pkg.dist.as_ref().map(|d| LockDist { dist_type: d.dist_type.clone(), url: d.url.clone(), reference: d.reference.clone(), shasum: d.shasum.clone() }),
         require: pkg.require.clone(),

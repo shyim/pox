@@ -4,6 +4,7 @@ use super::pool::{Pool, PackageId, PoolEntry};
 use super::request::Request;
 use super::rule::{Rule, RuleType};
 use super::rule_set::RuleSet;
+use crate::util::is_platform_package;
 
 /// Generates SAT rules from a dependency graph.
 ///
@@ -17,10 +18,11 @@ use super::rule_set::RuleSet;
 pub struct RuleGenerator<'a> {
     pool: &'a Pool,
     rules: RuleSet,
-    /// Packages we've already processed
+    /// Packages we've already processed (by ID)
     added_packages: HashSet<PackageId>,
-    /// Package names we've added same-name rules for
-    same_name_added: HashSet<String>,
+    /// Packages we've processed, grouped by name (for same-name conflict rules)
+    /// This matches Composer's addedPackagesByNames
+    added_packages_by_name: std::collections::HashMap<String, Vec<PackageId>>,
     /// Track which names have packages providing/replacing them (name -> package ids)
     providers_by_name: std::collections::HashMap<String, Vec<PackageId>>,
     /// Package names that are explicitly required by the user (root requirements)
@@ -35,7 +37,7 @@ impl<'a> RuleGenerator<'a> {
             pool,
             rules: RuleSet::new(),
             added_packages: HashSet::new(),
-            same_name_added: HashSet::new(),
+            added_packages_by_name: std::collections::HashMap::new(),
             providers_by_name: std::collections::HashMap::new(),
             root_required_names: HashSet::new(),
         }
@@ -43,6 +45,8 @@ impl<'a> RuleGenerator<'a> {
 
     /// Generate all rules for a request
     pub fn generate(mut self, request: &Request) -> RuleSet {
+        let start = std::time::Instant::now();
+
         // Collect all root required package names first
         // This is used to determine if providers/replacers can be auto-selected
         for (name, _) in request.all_requires() {
@@ -64,17 +68,52 @@ impl<'a> RuleGenerator<'a> {
             }
         }
 
+        // Add names from fixed packages' replace/provide to root_required_names
+        // Fixed packages (like the root package) are always installed, so their
+        // replaced/provided names should be available to satisfy other dependencies
+        for fixed in &request.fixed_packages {
+            let ids = self.pool.packages_by_name(&fixed.name);
+            for id in ids {
+                if let Some(pkg) = self.pool.package(id) {
+                    if pkg.version == fixed.version {
+                        for provided_name in pkg.get_names(true) {
+                            self.root_required_names.insert(provided_name.to_lowercase());
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         // Add fixed package rules first
         self.add_fixed_rules(request);
+        log::debug!("After fixed rules: {} rules", self.rules.len());
 
         // Add root requirement rules
         self.add_root_require_rules(request);
+        log::debug!("After root require rules: {} rules, {} packages", self.rules.len(), self.added_packages.len());
+
+        // Add same-name conflict rules (only one version of each package can be installed)
+        // This is done AFTER processing all packages, so we only create rules for
+        // packages that are actually reachable from root requirements
+        self.add_same_name_conflict_rules();
+        log::debug!("After same-name conflict rules: {} rules", self.rules.len());
 
         // Add conflict rules for all processed packages
         self.add_conflict_rules();
+        log::debug!("After conflict rules: {} rules", self.rules.len());
 
         // Add provider conflict rules (packages providing/replacing same name)
         self.add_provider_conflict_rules();
+        log::debug!("After provider conflict rules: {} rules", self.rules.len());
+
+        log::info!("Rule generation stats: {} packages processed, {} unique package names, {} provider names tracked in {:?}",
+            self.added_packages.len(),
+            self.added_packages_by_name.len(),
+            self.providers_by_name.len(),
+            start.elapsed()
+        );
+        log::debug!("Rules by type: {:?}", self.rules.stats());
 
         self.rules
     }
@@ -109,6 +148,26 @@ impl<'a> RuleGenerator<'a> {
             if providers.is_empty() {
                 // No packages satisfy this requirement
                 // Add an empty rule that will cause a conflict
+                log::warn!(
+                    "No packages satisfy root requirement {} {}. Pool has {} versions of {}:",
+                    name,
+                    constraint,
+                    self.pool.packages_by_name(name).len(),
+                    name
+                );
+                // Log all versions from pool for debugging (limit to 20)
+                for id in self.pool.packages_by_name(name).iter().take(20) {
+                    if let Some(pkg) = self.pool.package(*id) {
+                        log::warn!("  - {} {} (stability: {:?})", pkg.name, pkg.version, pkg.stability());
+                    }
+                }
+                // Log what versions are available in the pool
+                log::warn!("Available versions in pool for {}:", name);
+                let all_versions: Vec<_> = self.pool.packages_by_name(name).iter()
+                    .filter_map(|id| self.pool.package(*id))
+                    .map(|p| p.version.clone())
+                    .collect();
+                log::warn!("  All versions: {:?}", all_versions);
                 let rule = Rule::new(vec![], RuleType::RootRequire)
                     .with_target(name)
                     .with_constraint(constraint);
@@ -174,7 +233,7 @@ impl<'a> RuleGenerator<'a> {
                         for id in providers {
                             if !self.pool.is_alias(id) {
                                 if let Some(pkg) = self.pool.package(id) {
-                                    if !pkg.name.starts_with("php") && !pkg.name.starts_with("ext-") {
+                                    if !is_platform_package(&pkg.name) {
                                         self.add_package_rules(id);
                                     }
                                 }
@@ -193,8 +252,15 @@ impl<'a> RuleGenerator<'a> {
 
         let package = package.clone();
 
-        // Add same-name rules (only one version can be installed)
-        self.add_same_name_rules(&package.name);
+        // Track this package by all its names (name + replaces, NOT provides)
+        // for same-name conflict rules. This matches Composer's addedPackagesByNames pattern.
+        // PHP: foreach ($package->getNames(false) as $name) { $this->addedPackagesByNames[$name][] = $package; }
+        for name in package.get_names(false) {
+            self.added_packages_by_name
+                .entry(name)
+                .or_default()
+                .push(package_id);
+        }
 
         // Track all names this package provides/replaces for later conflict detection
         for name in package.get_names(true) {
@@ -254,112 +320,161 @@ impl<'a> RuleGenerator<'a> {
             for id in providers {
                 if let Some(pkg) = self.pool.package(id) {
                     // Platform packages (php, ext-*) don't have dependencies to process
-                    if !pkg.name.starts_with("php") && !pkg.name.starts_with("ext-") {
+                    if !is_platform_package(&pkg.name) {
                         self.add_package_rules(id);
                     }
                 }
             }
         }
 
-        // Add conflict rules for explicit conflicts
-        for (conflict_name, constraint) in &package.conflict {
-            let conflicting = self.pool.what_provides(conflict_name, Some(constraint));
-            for conflict_id in conflicting {
-                if conflict_id != package_id {
-                    let rule = Rule::conflict(vec![package_id, conflict_id])
-                        .with_source(package_id)
-                        .with_target(conflict_name);
-                    self.rules.add(rule);
-                }
+
+        // Note: explicit conflict rules are added later in add_conflict_rules()
+        // after all packages have been processed. This matches PHP Composer's approach.
+    }
+
+    /// Add same-name conflict rules for all processed packages.
+    /// Called once at the end of generate() - only processes packages that were
+    /// actually added during rule generation, not all packages in the pool.
+    /// This matches Composer's behavior in RuleSetGenerator.php lines 242-246.
+    fn add_same_name_conflict_rules(&mut self) {
+        for (name, package_ids) in &self.added_packages_by_name {
+            if package_ids.len() <= 1 {
+                continue;
             }
+
+            // Filter out alias-base pairs (they must coexist)
+            let mut non_alias_versions: Vec<PackageId> = Vec::new();
+            for &id in package_ids {
+                // Skip if this is an alias of another version in the list
+                if let Some(base_id) = self.pool.get_alias_base(id) {
+                    if package_ids.contains(&base_id) {
+                        continue; // Skip alias, keep only base
+                    }
+                }
+                non_alias_versions.push(id);
+            }
+
+            if non_alias_versions.len() <= 1 {
+                continue;
+            }
+
+            // Use a single multi-conflict rule instead of O(n²) pairwise conflicts
+            // This is much more efficient for packages with many versions
+            let rule = Rule::multi_conflict(non_alias_versions)
+                .with_target(name);
+            self.rules.add(rule);
         }
     }
 
-    /// Add same-name rules (only one version of a package can be installed)
-    fn add_same_name_rules(&mut self, name: &str) {
-        let name_lower = name.to_lowercase();
-        if self.same_name_added.contains(&name_lower) {
-            return;
-        }
-        self.same_name_added.insert(name_lower.clone());
-
-        let versions = self.pool.packages_by_name(name);
-        if versions.len() <= 1 {
-            return;
-        }
-
-        // Filter out alias-base pairs (they must coexist)
-        let mut non_alias_versions: Vec<PackageId> = Vec::new();
-        for id in &versions {
-            // Skip if this is an alias of another version in the list
-            if let Some(base_id) = self.pool.get_alias_base(*id) {
-                if versions.contains(&base_id) {
-                    continue; // Skip alias, keep only base
-                }
-            }
-            non_alias_versions.push(*id);
-        }
-
-        if non_alias_versions.len() <= 1 {
-            return;
-        }
-
-        // Use a single multi-conflict rule instead of O(n²) pairwise conflicts
-        // This is much more efficient for packages with many versions
-        let rule = Rule::multi_conflict(non_alias_versions);
-        self.rules.add(rule);
-    }
-
-    /// Add conflict rules for packages that conflict with each other
+    /// Add conflict rules for packages that conflict with each other.
+    /// This matches PHP Composer's addConflictRules() method.
+    ///
+    /// NOTE: This can generate a large number of rules when the pool contains
+    /// many versions of packages that other packages conflict with. PHP Composer
+    /// avoids this by using demand-driven package loading (only loading packages
+    /// reachable from root requirements). Our current approach loads all packages
+    /// upfront, which can lead to rule explosion in monorepos or when many packages
+    /// declare conflicts with common dependencies.
     fn add_conflict_rules(&mut self) {
-        // Collect all conflicts to add
-        let mut conflicts: Vec<(PackageId, PackageId)> = Vec::new();
+        let mut conflict_count = 0usize;
+        let mut skipped_not_added = 0usize;
+
+        for &package_id in &self.added_packages {
+            let Some(package) = self.pool.package(package_id) else {
+                continue;
+            };
+            let package = package.clone();
+
+            // Process explicit conflicts from package's "conflict" field
+            for (conflict_name, constraint) in &package.conflict {
+                let conflict_name_lower = conflict_name.to_lowercase();
+
+                // Skip if the conflict target is not in our processed packages
+                // PHP: if (!isset($this->addedPackagesByNames[$link->getTarget()])) { continue; }
+                if !self.added_packages_by_name.contains_key(&conflict_name_lower) {
+                    continue;
+                }
+
+                // Get matching packages from the pool, but only consider ones we've actually processed
+                let conflicting = self.pool.what_provides(conflict_name, Some(constraint));
+                for conflict_id in conflicting {
+                    if conflict_id != package_id {
+                        // Only create conflict rules for packages we've actually added
+                        if !self.added_packages.contains(&conflict_id) {
+                            skipped_not_added += 1;
+                            continue;
+                        }
+
+                        // Skip alias conflicts unless the name matches exactly
+                        // PHP: if (!$conflict instanceof AliasPackage || $conflict->getName() === $link->getTarget())
+                        if self.pool.is_alias(conflict_id) {
+                            if let Some(entry) = self.pool.entry(conflict_id) {
+                                if let Some(alias) = entry.as_alias() {
+                                    if alias.name().to_lowercase() != conflict_name_lower {
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+
+                        conflict_count += 1;
+                        let rule = Rule::conflict(vec![package_id, conflict_id])
+                            .with_source(package_id)
+                            .with_target(conflict_name);
+                        self.rules.add(rule);
+                    }
+                }
+            }
+        }
+
+        log::debug!("add_conflict_rules: {} conflict rules added, {} skipped (not in added_packages)",
+            conflict_count, skipped_not_added);
+    }
+
+    /// Add conflict rules for packages that REPLACE the same name.
+    ///
+    /// Note: Packages that merely `provide` a virtual package do NOT conflict
+    /// with each other. Multiple packages can provide the same virtual package
+    /// and be installed together (e.g., both symfony/console and symfony/http-kernel
+    /// can provide psr/log-implementation).
+    ///
+    /// Only packages that `replace` the same name conflict, because replace
+    /// means "this package replaces another package entirely".
+    fn add_provider_conflict_rules(&mut self) {
+        // Build a map of name -> packages that REPLACE it (not just provide)
+        let mut replacers_by_name: std::collections::HashMap<String, Vec<PackageId>> =
+            std::collections::HashMap::new();
 
         for &package_id in &self.added_packages {
             let Some(package) = self.pool.package(package_id) else {
                 continue;
             };
 
-            // Check replaces - replaced packages conflict with the replacer
+            // Only track replaces, not provides
             for (replaced_name, _) in &package.replace {
-                let replaced_ids = self.pool.packages_by_name(replaced_name);
-                for replaced_id in replaced_ids {
-                    if replaced_id != package_id {
-                        conflicts.push((package_id, replaced_id));
-                    }
-                }
+                let name = replaced_name.to_lowercase();
+                replacers_by_name
+                    .entry(name)
+                    .or_default()
+                    .push(package_id);
             }
         }
 
-        // Add conflict rules
-        for (a, b) in conflicts {
-            let rule = Rule::conflict(vec![a, b]);
-            self.rules.add(rule);
-        }
-    }
-
-    /// Add conflict rules for packages that provide/replace the same name
-    ///
-    /// When multiple packages provide or replace the same package name,
-    /// only one of them can be installed. This is the RULE_PACKAGE_SAME_NAME
-    /// behavior from Composer.
-    fn add_provider_conflict_rules(&mut self) {
-        // For each name that has multiple providers, add pairwise conflicts
-        for (name, provider_ids) in &self.providers_by_name {
-            if provider_ids.len() <= 1 {
+        // Add multi-conflict rules for packages that replace the same name
+        for (name, replacer_ids) in replacers_by_name {
+            if replacer_ids.len() <= 1 {
                 continue;
             }
 
-            // Skip if we've already added same-name rules for this name
-            // (the package's actual name is already handled)
-            if self.same_name_added.contains(name) {
+            // Skip if we've already added same-name conflict rules for this name
+            // (this happens when there are actual packages with this name)
+            if self.added_packages_by_name.contains_key(&name) {
                 continue;
             }
 
-            // Use multi-conflict rule instead of pairwise O(N^2) conflicts
-            // This forbids installing more than one package from the provider list
-            let rule = Rule::multi_conflict(provider_ids.clone())
-                .with_target(name);
+            // Use multi-conflict rule: at most one replacer can be installed
+            let rule = Rule::multi_conflict(replacer_ids)
+                .with_target(&name);
             self.rules.add(rule);
         }
     }
@@ -495,5 +610,55 @@ mod tests {
         let stats = rules.stats();
         println!("Rules generated: {:?}", stats);
         assert!(stats.total > 0);
+    }
+
+    #[test]
+    fn test_rule_generator_processes_phpunit_dependencies() {
+        // Regression test: packages like phpunit/* must not be skipped as platform packages
+        let mut pool = Pool::new();
+
+        // Add phpunit/phpunit which requires phpunit/php-code-coverage
+        let mut phpunit = Package::new("phpunit/phpunit", "10.0.0");
+        phpunit.require.insert("phpunit/php-code-coverage".to_string(), "^10.0".to_string());
+        pool.add_package(phpunit);
+
+        // Add phpunit/php-code-coverage which requires theseer/tokenizer
+        let mut coverage = Package::new("phpunit/php-code-coverage", "10.0.0");
+        coverage.require.insert("theseer/tokenizer".to_string(), "^1.2".to_string());
+        pool.add_package(coverage);
+
+        // Add theseer/tokenizer
+        pool.add_package(Package::new("theseer/tokenizer", "1.2.0"));
+
+        let mut request = Request::new();
+        request.require("phpunit/phpunit", "*");
+
+        let generator = RuleGenerator::new(&pool);
+        let rules = generator.generate(&request);
+
+        let require_rules: Vec<_> = rules.rules_of_type(RuleType::PackageRequires).collect();
+        assert!(require_rules.len() >= 2);
+    }
+
+    #[test]
+    fn test_rule_generator_skips_actual_platform_packages() {
+        let mut pool = Pool::new();
+
+        let mut package = Package::new("vendor/package", "1.0.0");
+        package.require.insert("php".to_string(), "^8.0".to_string());
+        package.require.insert("ext-json".to_string(), "*".to_string());
+        pool.add_package(package);
+
+        pool.add_platform_package(Package::new("php", "8.2.0"));
+        pool.add_platform_package(Package::new("ext-json", "8.2.0"));
+
+        let mut request = Request::new();
+        request.require("vendor/package", "*");
+
+        let generator = RuleGenerator::new(&pool);
+        let rules = generator.generate(&request);
+
+        let require_rules: Vec<_> = rules.rules_of_type(RuleType::PackageRequires).collect();
+        assert!(!require_rules.is_empty());
     }
 }

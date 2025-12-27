@@ -66,6 +66,24 @@ impl RepositoryManager {
         None
     }
 
+    /// Find packages matching a version constraint across all repositories
+    pub async fn find_packages_with_constraint(&self, name: &str, constraint: &str) -> Vec<Arc<Package>> {
+        let mut packages = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for repo in &self.repositories {
+            for pkg in repo.find_packages_with_constraint(name, constraint).await {
+                let key = format!("{}@{}", pkg.name, pkg.version);
+                if !seen.contains(&key) {
+                    seen.insert(key);
+                    packages.push(pkg);
+                }
+            }
+        }
+
+        packages
+    }
+
     /// Search across all repositories
     pub async fn search(&self, query: &str, mode: SearchMode) -> Vec<SearchResult> {
         let mut results = Vec::new();

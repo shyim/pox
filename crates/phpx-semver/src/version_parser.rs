@@ -1563,4 +1563,103 @@ mod tests {
         assert_eq!(parser.parse_constraints("1.0.x-dev#abcd123").unwrap().to_string(), "== 1.0.9999999.9999999-dev");
         assert_eq!(parser.parse_constraints("1.0.x-dev#trunk/@123").unwrap().to_string(), "== 1.0.9999999.9999999-dev");
     }
+
+    #[test]
+    fn test_tilde_constraint_matching() {
+        use crate::constraint::{Constraint, Operator};
+
+        let parser = VersionParser::new();
+
+        // Parse ~7.3.0 constraint
+        let constraint = parser.parse_constraints("~7.3.0").unwrap();
+        println!("~7.3.0 parsed as: {}", constraint);
+
+        // Test if 7.3.8.0 matches - should match because ~7.3.0 means >=7.3.0 <7.4.0
+        let v738 = Constraint::new(Operator::Equal, "7.3.8.0".to_string()).unwrap();
+        assert!(constraint.matches(&v738), "7.3.8.0 should match ~7.3.0");
+
+        // Test lower bound
+        let v730 = Constraint::new(Operator::Equal, "7.3.0.0".to_string()).unwrap();
+        assert!(constraint.matches(&v730), "7.3.0.0 should match ~7.3.0");
+
+        // Test upper bound (7.4 should NOT match)
+        let v740 = Constraint::new(Operator::Equal, "7.4.0.0".to_string()).unwrap();
+        assert!(!constraint.matches(&v740), "7.4.0.0 should NOT match ~7.3.0");
+
+        // Test v7.3.8 normalized
+        let normalized = parser.normalize("v7.3.8").unwrap();
+        println!("v7.3.8 normalized: {}", normalized);
+        let v738_normalized = Constraint::new(Operator::Equal, normalized).unwrap();
+        assert!(constraint.matches(&v738_normalized), "Normalized v7.3.8 should match ~7.3.0");
+    }
+
+    #[test]
+    fn test_constraint_to_constraint_matching_dev_version() {
+        // This tests how Composer handles provide/replace constraint matching
+        // Root package has replace: {"shopware/core": "=6.7.9999999.9999999-dev"}
+        // Other package requires "shopware/core": ">=6.7.2.0"
+        // These should match because =6.7.9999999.9999999-dev satisfies >=6.7.2.0
+
+        let parser = VersionParser::new();
+
+        // The require constraint: >=6.7.2.0
+        let require_constraint = parser.parse_constraints(">=6.7.2.0").unwrap();
+        println!(">=6.7.2.0 parsed as: {}", require_constraint);
+
+        // The provide/replace constraint: =6.7.9999999.9999999-dev
+        let provide_constraint = parser.parse_constraints("=6.7.9999999.9999999-dev").unwrap();
+        println!("=6.7.9999999.9999999-dev parsed as: {}", provide_constraint);
+
+        // These constraints should match (intersect)
+        let matches = require_constraint.matches(provide_constraint.as_ref());
+        println!(">=6.7.2.0 matches =6.7.9999999.9999999-dev? {}", matches);
+
+        assert!(matches, ">=6.7.2.0 should match =6.7.9999999.9999999-dev");
+    }
+
+    #[test]
+    fn test_caret_constraint_matching() {
+        use crate::constraint::{Constraint, Operator};
+
+        let parser = VersionParser::new();
+
+        // Parse ^9.3 constraint
+        let constraint = parser.parse_constraints("^9.3").unwrap();
+        println!("^9.3 parsed as: {}", constraint);
+
+        // Test if 9.3.0.0 matches - should match
+        let v930 = Constraint::new(Operator::Equal, "9.3.0.0".to_string()).unwrap();
+        assert!(constraint.matches(&v930), "9.3.0.0 should match ^9.3");
+
+        // Test if 9.4.0.0 matches - should match (^9.3 means >=9.3.0 <10.0.0)
+        let v940 = Constraint::new(Operator::Equal, "9.4.0.0".to_string()).unwrap();
+        assert!(constraint.matches(&v940), "9.4.0.0 should match ^9.3");
+
+        // Test if 10.0.0.0 matches - should NOT match
+        let v1000 = Constraint::new(Operator::Equal, "10.0.0.0".to_string()).unwrap();
+        assert!(!constraint.matches(&v1000), "10.0.0.0 should NOT match ^9.3");
+    }
+
+    #[test]
+    fn test_or_constraint_matching() {
+        use crate::constraint::{Constraint, Operator};
+
+        let parser = VersionParser::new();
+
+        // Parse ^2.3 || ^3.0 constraint (like lcobucci/clock requirement)
+        let constraint = parser.parse_constraints("^2.3 || ^3.0").unwrap();
+        println!("^2.3 || ^3.0 parsed as: {}", constraint);
+
+        // Test if 3.5.0.0 matches - should match
+        let v350 = Constraint::new(Operator::Equal, "3.5.0.0".to_string()).unwrap();
+        assert!(constraint.matches(&v350), "3.5.0.0 should match ^2.3 || ^3.0");
+
+        // Test if 2.5.0.0 matches - should match
+        let v250 = Constraint::new(Operator::Equal, "2.5.0.0".to_string()).unwrap();
+        assert!(constraint.matches(&v250), "2.5.0.0 should match ^2.3 || ^3.0");
+
+        // Test if 1.0.0.0 matches - should NOT match
+        let v100 = Constraint::new(Operator::Equal, "1.0.0.0".to_string()).unwrap();
+        assert!(!constraint.matches(&v100), "1.0.0.0 should NOT match ^2.3 || ^3.0");
+    }
 }

@@ -142,6 +142,54 @@ impl<'a> PoolOptimizer<'a> {
             }
         }
 
+        // Mark packages as irremovable if they provide/replace a virtual package
+        // that has no other providers in the pool
+        // This ensures root packages that replace things like shopware/core are kept
+        for id in pool.all_package_ids() {
+            if let Some(pkg) = pool.package(id) {
+                let mut is_sole_provider = false;
+
+                for (replaced, _) in &pkg.replace {
+                    let replaced_lower = replaced.to_lowercase();
+                    // Check if there are any direct packages with this name
+                    // or any other packages that provide/replace it
+                    let providers = pool.what_provides(&replaced_lower, None);
+                    // If only this package provides it (or the list is empty aside from this pkg)
+                    if providers.is_empty() || (providers.len() == 1 && providers[0] == id) {
+                        is_sole_provider = true;
+                        log::trace!(
+                            "{} {} is sole provider for replaced package {}",
+                            pkg.name,
+                            pkg.version,
+                            replaced_lower
+                        );
+                        break;
+                    }
+                }
+
+                if !is_sole_provider {
+                    for (provided, _) in &pkg.provide {
+                        let provided_lower = provided.to_lowercase();
+                        let providers = pool.what_provides(&provided_lower, None);
+                        if providers.is_empty() || (providers.len() == 1 && providers[0] == id) {
+                            is_sole_provider = true;
+                            log::trace!(
+                                "{} {} is sole provider for provided package {}",
+                                pkg.name,
+                                pkg.version,
+                                provided_lower
+                            );
+                            break;
+                        }
+                    }
+                }
+
+                if is_sole_provider {
+                    self.mark_irremovable(pool, id);
+                }
+            }
+        }
+
         // Extract require constraints from root requirements
         for (name, constraint) in request.all_requires() {
             self.extract_require_constraint(name, constraint);
@@ -211,21 +259,66 @@ impl<'a> PoolOptimizer<'a> {
     }
 
     /// Extract a require constraint for a package name.
+    ///
+    /// Disjunctive constraints (e.g. "^2.14 || ^3.3") are expanded into separate
+    /// constraints to ensure we keep the best matching package for EACH branch.
     fn extract_require_constraint(&mut self, package_name: &str, constraint: &str) {
         let name_lower = package_name.to_lowercase();
-        self.require_constraints
-            .entry(name_lower)
-            .or_default()
-            .insert(constraint.to_string());
+        let entry = self.require_constraints.entry(name_lower).or_default();
+
+        // Expand disjunctive (OR) constraints into separate constraints
+        for expanded in Self::expand_disjunctive_constraints(constraint) {
+            entry.insert(expanded);
+        }
     }
 
     /// Extract a conflict constraint for a package name.
+    ///
+    /// Disjunctive constraints are expanded similar to require constraints.
     fn extract_conflict_constraint(&mut self, package_name: &str, constraint: &str) {
         let name_lower = package_name.to_lowercase();
-        self.conflict_constraints
-            .entry(name_lower)
-            .or_default()
-            .insert(constraint.to_string());
+        let entry = self.conflict_constraints.entry(name_lower).or_default();
+
+        // Expand disjunctive (OR) constraints into separate constraints
+        for expanded in Self::expand_disjunctive_constraints(constraint) {
+            entry.insert(expanded);
+        }
+    }
+
+    /// Expand disjunctive (OR) constraints into separate parts.
+    ///
+    /// For example, "^2.14 || ^3.3" becomes ["^2.14", "^3.3"].
+    /// And "^2.0.5|^3.0|^4.0" becomes ["^2.0.5", "^3.0", "^4.0"].
+    /// This ensures the optimizer keeps the best package for EACH branch of an OR,
+    /// not just the overall best match.
+    fn expand_disjunctive_constraints(constraint: &str) -> Vec<String> {
+        // First try splitting on || (double pipe)
+        let parts: Vec<&str> = constraint
+            .split("||")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if parts.len() > 1 {
+            // This is a disjunctive constraint with || - return each part separately
+            return parts.into_iter().map(String::from).collect();
+        }
+
+        // Also try splitting on single | (but not inside version specs like "1.0-beta|alpha")
+        // In Composer, | is also a valid OR operator
+        let parts: Vec<&str> = constraint
+            .split('|')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if parts.len() > 1 {
+            // This is a disjunctive constraint with | - return each part separately
+            parts.into_iter().map(String::from).collect()
+        } else {
+            // Single constraint (or conjunctive with comma/space) - return as-is
+            vec![constraint.to_string()]
+        }
     }
 
     /// Optimization 1: Remove packages with identical dependencies.
@@ -322,7 +415,8 @@ impl<'a> PoolOptimizer<'a> {
             // Check requires
             if let Some(constraints) = require_constraints_snapshot.get(&pkg_name) {
                 for (id, constraint_str) in constraints {
-                    if self.version_matches_constraint(&pkg.version, constraint_str) {
+                    let matches = self.version_matches_constraint(&pkg.version, constraint_str);
+                    if matches {
                         matched_constraints.push(id << 1); // LSB 0 for require
                     }
                 }
@@ -341,13 +435,13 @@ impl<'a> PoolOptimizer<'a> {
             if !matched_constraints.is_empty() {
                 // Determine group hash
                 matched_constraints.sort_unstable();
-                
+
                 let mut hasher = DefaultHasher::new();
                 for mc in matched_constraints {
                     mc.hash(&mut hasher);
                 }
                 let group_hash = hasher.finish();
-                
+
                 let dep_hash = self.calculate_dependency_hash(pkg);
 
                 groups
@@ -358,15 +452,25 @@ impl<'a> PoolOptimizer<'a> {
                     .entry(dep_hash)
                     .or_default()
                     .push(id);
-                
+
                 packages_in_groups.insert(id);
             }
         }
 
         // Now keep the best package from each group
-        for (_pkg_name, constraint_groups) in groups.iter() {
-            for (_group_hash, dep_hash_groups) in constraint_groups.iter() {
-                for (_dep_hash, packages) in dep_hash_groups.iter() {
+        // Sort keys for deterministic iteration order
+        let mut pkg_names: Vec<_> = groups.keys().collect();
+        pkg_names.sort();
+        for pkg_name in pkg_names {
+            let constraint_groups = &groups[pkg_name];
+            let mut group_hashes: Vec<_> = constraint_groups.keys().collect();
+            group_hashes.sort();
+            for group_hash in group_hashes {
+                let dep_hash_groups = &constraint_groups[group_hash];
+                let mut dep_hashes: Vec<_> = dep_hash_groups.keys().collect();
+                dep_hashes.sort();
+                for dep_hash in dep_hashes {
+                    let packages = &dep_hash_groups[dep_hash];
                     if packages.len() == 1 {
                         // Only one package in this group, must keep it
                         self.keep_package(pool, packages[0]);
@@ -559,6 +663,10 @@ impl<'a> PoolOptimizer<'a> {
         } else {
             let normalized = self.version_parser.normalize(version)
                 .unwrap_or_else(|_| version.to_string());
+            // Debug logging for twig/twig investigation
+            if version.contains("3.22") || version.contains("3.21") {
+                log::trace!("Normalizing version '{}' -> '{}'", version, normalized);
+            }
             self.version_cache.insert(version.to_string(), normalized.clone());
             normalized
         };
@@ -603,6 +711,33 @@ impl<'a> PoolOptimizer<'a> {
 
     /// Apply the collected removals and create a new optimized pool.
     fn apply_removals_to_pool(&self, original_pool: &Pool) -> Pool {
+        log::debug!("Pool optimizer removing {} packages from pool of {}", self.packages_to_remove.len(), original_pool.len());
+
+        // Debug: count how many of each package are being removed
+        let mut pkg_counts: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
+        for id in original_pool.all_package_ids() {
+            if let Some(pkg) = original_pool.package(id) {
+                let entry = pkg_counts.entry(pkg.name.clone()).or_insert((0, 0));
+                entry.0 += 1; // total
+                if self.packages_to_remove.contains(&id) {
+                    entry.1 += 1; // removed
+                }
+            }
+        }
+        // Log packages where all versions are removed (potential problem)
+        for (name, (total, removed)) in &pkg_counts {
+            if *removed == *total && *total > 0 {
+                log::warn!("Pool optimizer removed all {} versions of {}", total, name);
+            }
+        }
+
+        // Log what versions of key packages are being kept
+        for key in &["symfony/console", "symfony/http-kernel", "symfony/string", "symfony/event-dispatcher"] {
+            if let Some(&(total, removed)) = pkg_counts.get(*key) {
+                log::debug!("Pool optimizer: {} - kept {}/{} versions", key, total - removed, total);
+            }
+        }
+
         let mut new_pool = Pool::with_minimum_stability(original_pool.minimum_stability());
 
         // Copy stability flags
@@ -624,9 +759,15 @@ impl<'a> PoolOptimizer<'a> {
                         let repo_name = original_pool.get_repository(id);
                         let priority = original_pool.get_priority_by_id(id);
 
-                        // Platform packages should bypass stability filtering
-                        // as they are fixed system packages
-                        if is_platform_package(&pkg.name) {
+                        // Platform packages and packages with replace/provide should bypass
+                        // stability filtering. Platform packages are fixed system packages.
+                        // Packages with replace/provide are typically root or metapackages
+                        // that need to be preserved regardless of their version stability.
+                        let bypass_stability = is_platform_package(&pkg.name)
+                            || !pkg.replace.is_empty()
+                            || !pkg.provide.is_empty();
+
+                        if bypass_stability {
                             new_pool.add_package_arc_bypass_stability(
                                 Arc::clone(pkg),
                                 repo_name,

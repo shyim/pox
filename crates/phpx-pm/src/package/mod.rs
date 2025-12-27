@@ -7,6 +7,7 @@ mod alias;
 mod autoload;
 mod link;
 mod package;
+mod root_version;
 mod source;
 
 pub use alias::{
@@ -18,4 +19,5 @@ pub use package::{
     package_type, Abandoned, ArchiveConfig, Author, Funding, Package, ScriptHandler, Scripts,
     Stability, Support,
 };
+pub use root_version::{detect_root_version, get_git_branch, RootVersion, RootVersionSource};
 pub use source::{Dist, Mirror, Source};

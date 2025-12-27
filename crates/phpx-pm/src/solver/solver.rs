@@ -29,7 +29,7 @@ impl<'a> Solver<'a> {
         Self {
             pool,
             policy,
-            optimize_pool: true, // Pool optimization enabled with caching
+            optimize_pool: true, // Pool optimization enabled
         }
     }
 
@@ -77,7 +77,7 @@ impl<'a> Solver<'a> {
         let generator = RuleGenerator::new(pool);
         let rules = generator.generate(request);
 
-        log::debug!("Generated {} rules in {:?}", rules.len(), start.elapsed());
+        log::info!("Generated {} rules in {:?}", rules.len(), start.elapsed());
 
         // Create solver state
         let mut state = SolverState::new(rules);
@@ -105,7 +105,7 @@ impl<'a> Solver<'a> {
     /// Main SAT solving loop
     fn run_sat(&self, state: &mut SolverState, pool: &Pool, request: &Request) -> Result<(), ProblemSet> {
         // Process assertion rules first (single-literal rules)
-        self.process_assertions(state)?;
+        self.process_assertions(state, pool)?;
 
         // Iteration counter for detecting infinite loops
         let mut iterations = 0u32;
@@ -125,8 +125,19 @@ impl<'a> Solver<'a> {
                 // Conflict found - try alternatives first before CDCL learning
                 if state.decisions.level() == 1 {
                     // Conflict at level 1 means unsolvable
+                    log::debug!("Conflict at level 1: rule {} is unsolvable", conflict_rule);
+                    if let Some(rule) = state.rules.get(conflict_rule) {
+                        log::debug!("Conflict rule type: {:?}, literals: {:?}", rule.rule_type(), rule.literals());
+                        // Log package names for the conflicting literals
+                        for lit in rule.literals() {
+                            let pkg_id = lit.unsigned_abs() as PackageId;
+                            if let Some(pkg) = pool.package(pkg_id) {
+                                log::debug!("  Package {} = {} {}", pkg_id, pkg.name, pkg.version);
+                            }
+                        }
+                    }
                     let mut problems = ProblemSet::new();
-                    problems.add(self.analyze_unsolvable(state, conflict_rule));
+                    problems.add(self.analyze_unsolvable(state, pool, conflict_rule));
                     return Err(problems);
                 }
 
@@ -224,7 +235,7 @@ impl<'a> Solver<'a> {
 
     /// Process assertion rules (single-literal rules that must be true)
     /// Also check for empty rules which indicate unsatisfiable requirements
-    fn process_assertions(&self, state: &mut SolverState) -> Result<(), ProblemSet> {
+    fn process_assertions(&self, state: &mut SolverState, pool: &Pool) -> Result<(), ProblemSet> {
         state.decisions.increment_level(); // Level 1 for assertions
 
         // First check for empty rules (unsatisfiable requirements like missing packages)
@@ -237,7 +248,7 @@ impl<'a> Solver<'a> {
                 // Empty rule = unsatisfiable (e.g., requiring a non-existent package)
                 let mut problems = ProblemSet::new();
                 let mut problem = Problem::new();
-                problem.add_rule(rule);
+                problem.add_rule_with_pool(rule, pool);
                 problems.add(problem);
                 return Err(problems);
             }
@@ -256,7 +267,7 @@ impl<'a> Solver<'a> {
                 // Conflict with existing decision
                 let mut problems = ProblemSet::new();
                 let mut problem = Problem::new();
-                problem.add_rule(rule);
+                problem.add_rule_with_pool(rule, pool);
                 problems.add(problem);
                 return Err(problems);
             }
@@ -298,6 +309,10 @@ impl<'a> Solver<'a> {
                     PropagateResult::Ok => {}
                     PropagateResult::Unit(unit_lit, rule_id) => {
                         if state.decisions.conflict(unit_lit) {
+                            // Log conflict for debugging
+                            if let Some(rule) = state.rules.get(rule_id) {
+                                log::debug!("Conflict in propagation: rule {:?} type {:?}", rule_id, rule.rule_type());
+                            }
                             return Err(rule_id);
                         }
                         if !state.decisions.satisfied(unit_lit) {
@@ -488,17 +503,17 @@ impl<'a> Solver<'a> {
     }
 
     /// Analyze an unsolvable problem at level 1
-    fn analyze_unsolvable(&self, state: &SolverState, conflict_rule_id: u32) -> Problem {
+    fn analyze_unsolvable(&self, state: &SolverState, pool: &Pool, conflict_rule_id: u32) -> Problem {
         let mut problem = Problem::new();
 
         if let Some(rule) = state.rules.get(conflict_rule_id) {
-            problem.add_rule(rule);
+            problem.add_rule_with_pool(rule, pool);
 
             // Follow the chain of rules that led to this conflict
             for &lit in rule.literals() {
                 if let Some(rule_id) = state.decisions.decision_rule(lit) {
                     if let Some(cause_rule) = state.rules.get(rule_id) {
-                        problem.add_rule(cause_rule);
+                        problem.add_rule_with_pool(cause_rule, pool);
                     }
                 }
             }
@@ -514,8 +529,11 @@ impl<'a> Solver<'a> {
         let mut transaction = Transaction::new();
         let mut installed_base_packages = std::collections::HashSet::new();
 
+        let installed_pkgs: Vec<_> = state.decisions.installed_packages().collect();
+        log::debug!("Building transaction from {} installed packages", installed_pkgs.len());
+
         // Get all packages decided to be installed
-        for pkg_id in state.decisions.installed_packages() {
+        for pkg_id in installed_pkgs {
             // Check if this is an alias package
             if let Some(entry) = pool.entry(pkg_id) {
                 match entry {

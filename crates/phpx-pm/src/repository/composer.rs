@@ -310,11 +310,16 @@ impl ComposerRepository {
         let mut result = Vec::new();
 
         if let Some(versions) = data.packages.get(name) {
-            // In Packagist v2 minified format, only the first version has all fields.
-            // Subsequent versions inherit from the first one.
-            let base = versions.first().cloned();
-            for version_data in versions {
-                let pkg = self.convert_to_package(name, version_data, base.as_ref());
+            // Packagist v2 minified format uses delta compression:
+            // - First version has all fields
+            // - Subsequent versions only include fields that CHANGED from the PREVIOUS version
+            // - `null` value means "same as previous version"
+            // - "__unset" string means "field was removed"
+            //
+            // We must expand each version based on the PREVIOUS expanded version, not the first.
+            let expanded_versions = Self::expand_minified_versions(versions);
+            for expanded_data in &expanded_versions {
+                let pkg = self.convert_to_package(name, expanded_data, None);
                 result.push(Arc::new(pkg));
             }
         }
@@ -328,33 +333,96 @@ impl ComposerRepository {
         Ok(result)
     }
 
-    /// Convert Packagist version data to a Package
-    /// In minified format, fields not present in `data` are inherited from `base`.
-    fn convert_to_package(&self, package_name: &str, data: &PackagistVersion, base: Option<&PackagistVersion>) -> Package {
-        let mut pkg = Package::new(package_name, &data.version);
+    /// Expand Packagist v2 minified versions to full version data.
+    ///
+    /// Packagist v2 uses delta compression where each version only includes
+    /// fields that changed from the previous version. This function expands
+    /// the minified data to full versions.
+    fn expand_minified_versions(versions: &[PackagistVersion]) -> Vec<PackagistVersion> {
+        let mut result = Vec::with_capacity(versions.len());
+        let mut expanded: Option<PackagistVersion> = None;
 
-        // Helper macro to get field from data or fallback to base
-        macro_rules! get_field {
-            ($field:ident) => {
-                data.$field.clone().or_else(|| base.and_then(|b| b.$field.clone()))
+        for version_data in versions {
+            if expanded.is_none() {
+                // First version - use as-is, it has all fields
+                expanded = Some(version_data.clone());
+                result.push(version_data.clone());
+                continue;
+            }
+
+            // Apply delta: start with previous expanded version, apply changes from current
+            let prev = expanded.as_ref().unwrap();
+            let new_expanded = PackagistVersion {
+                version: version_data.version.clone(),
+                // Inherit from previous, override if current has value
+                version_normalized: version_data.version_normalized.clone()
+                    .or_else(|| prev.version_normalized.clone()),
+                description: Self::apply_delta_opt(&version_data.description, &prev.description),
+                homepage: Self::apply_delta_opt(&version_data.homepage, &prev.homepage),
+                license: Self::apply_delta_opt(&version_data.license, &prev.license),
+                keywords: Self::apply_delta_opt(&version_data.keywords, &prev.keywords),
+                authors: Self::apply_delta_opt(&version_data.authors, &prev.authors),
+                require: Self::apply_delta_hashmap(&version_data.require, &prev.require),
+                require_dev: Self::apply_delta_hashmap(&version_data.require_dev, &prev.require_dev),
+                conflict: Self::apply_delta_hashmap(&version_data.conflict, &prev.conflict),
+                provide: Self::apply_delta_hashmap(&version_data.provide, &prev.provide),
+                replace: Self::apply_delta_hashmap(&version_data.replace, &prev.replace),
+                suggest: Self::apply_delta_hashmap(&version_data.suggest, &prev.suggest),
+                package_type: Self::apply_delta_opt(&version_data.package_type, &prev.package_type),
+                bin: Self::apply_delta_opt(&version_data.bin, &prev.bin),
+                source: Self::apply_delta_opt(&version_data.source, &prev.source),
+                dist: Self::apply_delta_opt(&version_data.dist, &prev.dist),
+                autoload: Self::apply_delta_opt(&version_data.autoload, &prev.autoload),
+                autoload_dev: Self::apply_delta_opt(&version_data.autoload_dev, &prev.autoload_dev),
+                time: Self::apply_delta_opt(&version_data.time, &prev.time),
+                notification_url: Self::apply_delta_opt(&version_data.notification_url, &prev.notification_url),
+                support: Self::apply_delta_opt(&version_data.support, &prev.support),
+                funding: Self::apply_delta_opt(&version_data.funding, &prev.funding),
+                extra: Self::apply_delta_opt(&version_data.extra, &prev.extra),
             };
+
+            result.push(new_expanded.clone());
+            expanded = Some(new_expanded);
         }
 
-        pkg.description = get_field!(description);
-        pkg.homepage = get_field!(homepage);
-        pkg.license = get_field!(license).unwrap_or_default();
-        pkg.keywords = get_field!(keywords).unwrap_or_default();
-        pkg.require = get_field!(require).unwrap_or_default();
-        pkg.require_dev = get_field!(require_dev).unwrap_or_default();
-        pkg.conflict = get_field!(conflict).unwrap_or_default();
-        pkg.provide = get_field!(provide).unwrap_or_default();
-        pkg.replace = get_field!(replace).unwrap_or_default();
-        pkg.suggest = get_field!(suggest).unwrap_or_default();
-        pkg.package_type = get_field!(package_type).unwrap_or_else(|| "library".to_string());
-        pkg.bin = get_field!(bin).unwrap_or_default();
+        result
+    }
 
-        let source = data.source.as_ref().or_else(|| base.and_then(|b| b.source.as_ref()));
-        if let Some(source) = source {
+    /// Apply delta for Option fields: if current has value, use it; otherwise inherit from prev
+    fn apply_delta_opt<T: Clone>(current: &Option<T>, prev: &Option<T>) -> Option<T> {
+        current.clone().or_else(|| prev.clone())
+    }
+
+    /// Apply delta for HashMap fields: if current has value, use it; otherwise inherit from prev
+    fn apply_delta_hashmap(current: &Option<HashMap<String, String>>, prev: &Option<HashMap<String, String>>) -> Option<HashMap<String, String>> {
+        current.clone().or_else(|| prev.clone())
+    }
+
+    /// Convert Packagist version data to a Package.
+    /// The data should already be expanded (not minified).
+    fn convert_to_package(&self, package_name: &str, data: &PackagistVersion, _base: Option<&PackagistVersion>) -> Package {
+        // Use normalized version if available, otherwise use the pretty version
+        let version = data.version_normalized.as_ref()
+            .unwrap_or(&data.version);
+        let mut pkg = Package::new(package_name, version);
+        // Store the pretty version separately
+        pkg.pretty_version = Some(data.version.clone());
+
+        // Data is already expanded, so we just use it directly
+        pkg.description = data.description.clone();
+        pkg.homepage = data.homepage.clone();
+        pkg.license = data.license.clone().unwrap_or_default();
+        pkg.keywords = data.keywords.clone().unwrap_or_default();
+        pkg.require = data.require.clone().unwrap_or_default();
+        pkg.require_dev = data.require_dev.clone().unwrap_or_default();
+        pkg.conflict = data.conflict.clone().unwrap_or_default();
+        pkg.provide = data.provide.clone().unwrap_or_default();
+        pkg.replace = data.replace.clone().unwrap_or_default();
+        pkg.suggest = data.suggest.clone().unwrap_or_default();
+        pkg.package_type = data.package_type.clone().unwrap_or_else(|| "library".to_string());
+        pkg.bin = data.bin.clone().unwrap_or_default();
+
+        if let Some(source) = &data.source {
             pkg.source = Some(Source::new(
                 &source.source_type,
                 &source.url,
@@ -362,8 +430,7 @@ impl ComposerRepository {
             ));
         }
 
-        let dist = data.dist.as_ref().or_else(|| base.and_then(|b| b.dist.as_ref()));
-        if let Some(dist) = dist {
+        if let Some(dist) = &data.dist {
             let mut d = Dist::new(&dist.dist_type, &dist.url);
             if let Some(ref r) = dist.reference {
                 d = d.with_reference(r);
@@ -377,8 +444,7 @@ impl ComposerRepository {
             pkg.dist = Some(d);
         }
 
-        let authors = data.authors.as_ref().or_else(|| base.and_then(|b| b.authors.as_ref()));
-        if let Some(authors) = authors {
+        if let Some(authors) = &data.authors {
             pkg.authors = authors.iter().map(|a| crate::package::Author {
                 name: a.name.clone(),
                 email: a.email.clone(),
@@ -387,25 +453,22 @@ impl ComposerRepository {
             }).collect();
         }
 
-        let autoload = data.autoload.as_ref().or_else(|| base.and_then(|b| b.autoload.as_ref()));
-        if let Some(al) = autoload {
+        if let Some(al) = &data.autoload {
             pkg.autoload = Some(Self::convert_autoload(al));
         }
 
-        let autoload_dev = data.autoload_dev.as_ref().or_else(|| base.and_then(|b| b.autoload_dev.as_ref()));
-        if let Some(al) = autoload_dev {
+        if let Some(al) = &data.autoload_dev {
             pkg.autoload_dev = Some(Self::convert_autoload(al));
         }
 
-        let time = data.time.as_ref().or_else(|| base.and_then(|b| b.time.as_ref()));
+        let time = data.time.as_ref();
         if let Some(t) = time {
             pkg.time = chrono::DateTime::parse_from_rfc3339(t).ok().map(|dt| dt.with_timezone(&chrono::Utc));
         }
 
-        pkg.notification_url = data.notification_url.clone().or_else(|| base.and_then(|b| b.notification_url.clone()));
+        pkg.notification_url = data.notification_url.clone();
 
-        let support = data.support.as_ref().or_else(|| base.and_then(|b| b.support.as_ref()));
-        if let Some(s) = support {
+        if let Some(s) = &data.support {
             pkg.support = Some(crate::package::Support {
                 issues: s.issues.clone(),
                 forum: s.forum.clone(),
@@ -420,15 +483,14 @@ impl ComposerRepository {
             });
         }
 
-        let funding = data.funding.as_ref().or_else(|| base.and_then(|b| b.funding.as_ref()));
-        if let Some(f) = funding {
+        if let Some(f) = &data.funding {
             pkg.funding = f.iter().map(|pf| crate::package::Funding {
                 funding_type: pf.funding_type.clone(),
                 url: pf.url.clone(),
             }).collect();
         }
 
-        pkg.extra = data.extra.clone().or_else(|| base.and_then(|b| b.extra.clone()));
+        pkg.extra = data.extra.clone();
 
         // Replace self.version constraints with actual version
         pkg.replace_self_version();
@@ -591,6 +653,8 @@ struct PackagistResponse {
 #[derive(Debug, Clone, Deserialize)]
 struct PackagistVersion {
     version: String,
+    #[serde(default)]
+    version_normalized: Option<String>,
     #[serde(default, deserialize_with = "deserialize_maybe_unset")]
     description: Option<String>,
     #[serde(default, deserialize_with = "deserialize_maybe_unset")]
@@ -721,4 +785,337 @@ struct SearchResultItem {
     downloads: Option<u64>,
     favers: Option<u64>,
     abandoned: Option<Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test basic delta compression expansion where versions inherit from previous
+    #[test]
+    fn test_expand_minified_versions_basic_inheritance() {
+        // Simulates Packagist v2 response where newer versions omit unchanged fields
+        let json = r#"[
+            {
+                "version": "2.0.0",
+                "version_normalized": "2.0.0.0",
+                "require": {"php": ">=8.0"},
+                "description": "A test package"
+            },
+            {
+                "version": "1.1.0",
+                "version_normalized": "1.1.0.0"
+            },
+            {
+                "version": "1.0.0",
+                "version_normalized": "1.0.0.0"
+            }
+        ]"#;
+
+        let versions: Vec<PackagistVersion> = serde_json::from_str(json).unwrap();
+        let expanded = ComposerRepository::expand_minified_versions(&versions);
+
+        assert_eq!(expanded.len(), 3);
+
+        // First version has all fields
+        assert_eq!(expanded[0].version, "2.0.0");
+        assert_eq!(expanded[0].require.as_ref().unwrap().get("php").unwrap(), ">=8.0");
+        assert_eq!(expanded[0].description.as_ref().unwrap(), "A test package");
+
+        // Second version inherits from first
+        assert_eq!(expanded[1].version, "1.1.0");
+        assert_eq!(expanded[1].require.as_ref().unwrap().get("php").unwrap(), ">=8.0");
+        assert_eq!(expanded[1].description.as_ref().unwrap(), "A test package");
+
+        // Third version inherits from second (which inherited from first)
+        assert_eq!(expanded[2].version, "1.0.0");
+        assert_eq!(expanded[2].require.as_ref().unwrap().get("php").unwrap(), ">=8.0");
+        assert_eq!(expanded[2].description.as_ref().unwrap(), "A test package");
+    }
+
+    /// Test that fields are properly overridden when a version specifies them
+    #[test]
+    fn test_expand_minified_versions_field_override() {
+        let json = r#"[
+            {
+                "version": "2.0.0",
+                "version_normalized": "2.0.0.0",
+                "require": {"php": ">=8.0", "ext-json": "*"},
+                "description": "Version 2"
+            },
+            {
+                "version": "1.0.0",
+                "version_normalized": "1.0.0.0",
+                "require": {"php": ">=7.4"},
+                "description": "Version 1"
+            }
+        ]"#;
+
+        let versions: Vec<PackagistVersion> = serde_json::from_str(json).unwrap();
+        let expanded = ComposerRepository::expand_minified_versions(&versions);
+
+        assert_eq!(expanded.len(), 2);
+
+        // First version
+        assert_eq!(expanded[0].require.as_ref().unwrap().get("php").unwrap(), ">=8.0");
+        assert!(expanded[0].require.as_ref().unwrap().contains_key("ext-json"));
+        assert_eq!(expanded[0].description.as_ref().unwrap(), "Version 2");
+
+        // Second version overrides require completely (not merged!)
+        assert_eq!(expanded[1].require.as_ref().unwrap().get("php").unwrap(), ">=7.4");
+        // ext-json should NOT be present - the entire require block was replaced
+        assert!(!expanded[1].require.as_ref().unwrap().contains_key("ext-json"));
+        assert_eq!(expanded[1].description.as_ref().unwrap(), "Version 1");
+    }
+
+    /// Test real-world Packagist v2 payload from doctrine/dbal
+    /// This tests the actual delta compression format used by Packagist
+    #[test]
+    fn test_expand_minified_doctrine_dbal_sample() {
+        // Real sample from https://repo.packagist.org/p2/doctrine/dbal.json
+        // Versions are ordered newest to oldest
+        let json = r#"[
+            {
+                "version": "3.4.6",
+                "version_normalized": "3.4.6.0",
+                "require": {
+                    "php": "^7.4 || ^8.0",
+                    "composer-runtime-api": "^2",
+                    "doctrine/cache": "^1.11|^2.0",
+                    "doctrine/deprecations": "^0.5.3|^1",
+                    "doctrine/event-manager": "^1.0",
+                    "psr/cache": "^1|^2|^3",
+                    "psr/log": "^1|^2|^3"
+                },
+                "description": "Powerful PHP database abstraction layer"
+            },
+            {
+                "version": "3.4.5",
+                "version_normalized": "3.4.5.0"
+            },
+            {
+                "version": "3.4.4",
+                "version_normalized": "3.4.4.0"
+            },
+            {
+                "version": "3.4.3",
+                "version_normalized": "3.4.3.0"
+            }
+        ]"#;
+
+        let versions: Vec<PackagistVersion> = serde_json::from_str(json).unwrap();
+        let expanded = ComposerRepository::expand_minified_versions(&versions);
+
+        assert_eq!(expanded.len(), 4);
+
+        // All versions should have the same require (inherited from 3.4.6)
+        for (i, v) in expanded.iter().enumerate() {
+            let require = v.require.as_ref()
+                .unwrap_or_else(|| panic!("Version {} ({}) should have require", i, v.version));
+
+            assert_eq!(
+                require.get("php").unwrap(),
+                "^7.4 || ^8.0",
+                "Version {} ({}) should have php requirement", i, v.version
+            );
+            assert!(
+                !require.contains_key("shopware/core"),
+                "Version {} ({}) should NOT have shopware/core requirement", i, v.version
+            );
+        }
+
+        // Verify version numbers are preserved
+        assert_eq!(expanded[0].version, "3.4.6");
+        assert_eq!(expanded[1].version, "3.4.5");
+        assert_eq!(expanded[2].version, "3.4.4");
+        assert_eq!(expanded[3].version, "3.4.3");
+    }
+
+    /// Test real-world Packagist v2 payload from symfony packages
+    /// Multiple packages providing the same virtual package
+    #[test]
+    fn test_expand_minified_symfony_sample() {
+        // Sample from symfony/console showing provide for psr/log-implementation
+        let json = r#"[
+            {
+                "version": "v7.3.8",
+                "version_normalized": "7.3.8.0",
+                "require": {
+                    "php": ">=8.2",
+                    "symfony/polyfill-mbstring": "~1.0",
+                    "symfony/service-contracts": "^2.5|^3"
+                },
+                "provide": {
+                    "psr/log-implementation": "1.0|2.0|3.0"
+                },
+                "description": "Symfony Console Component"
+            },
+            {
+                "version": "v7.3.7",
+                "version_normalized": "7.3.7.0"
+            },
+            {
+                "version": "v7.3.0",
+                "version_normalized": "7.3.0.0",
+                "require": {
+                    "php": ">=8.2",
+                    "symfony/polyfill-mbstring": "~1.0"
+                }
+            }
+        ]"#;
+
+        let versions: Vec<PackagistVersion> = serde_json::from_str(json).unwrap();
+        let expanded = ComposerRepository::expand_minified_versions(&versions);
+
+        assert_eq!(expanded.len(), 3);
+
+        // v7.3.8 has all fields
+        assert_eq!(expanded[0].require.as_ref().unwrap().get("php").unwrap(), ">=8.2");
+        assert!(expanded[0].require.as_ref().unwrap().contains_key("symfony/service-contracts"));
+        assert_eq!(
+            expanded[0].provide.as_ref().unwrap().get("psr/log-implementation").unwrap(),
+            "1.0|2.0|3.0"
+        );
+
+        // v7.3.7 inherits from v7.3.8
+        assert_eq!(expanded[1].require.as_ref().unwrap().get("php").unwrap(), ">=8.2");
+        assert!(expanded[1].require.as_ref().unwrap().contains_key("symfony/service-contracts"));
+        assert_eq!(
+            expanded[1].provide.as_ref().unwrap().get("psr/log-implementation").unwrap(),
+            "1.0|2.0|3.0"
+        );
+
+        // v7.3.0 overrides require (loses symfony/service-contracts) but keeps provide
+        assert_eq!(expanded[2].require.as_ref().unwrap().get("php").unwrap(), ">=8.2");
+        assert!(!expanded[2].require.as_ref().unwrap().contains_key("symfony/service-contracts"));
+        assert_eq!(
+            expanded[2].provide.as_ref().unwrap().get("psr/log-implementation").unwrap(),
+            "1.0|2.0|3.0"
+        );
+    }
+
+    /// Test that different packages don't contaminate each other
+    /// This is the bug we're trying to prevent
+    #[test]
+    fn test_expand_minified_no_cross_package_contamination() {
+        // Parse two different packages separately
+        let doctrine_json = r#"[
+            {
+                "version": "3.4.6",
+                "version_normalized": "3.4.6.0",
+                "require": {"php": "^7.4 || ^8.0", "doctrine/cache": "^1.11|^2.0"}
+            },
+            {
+                "version": "3.4.5",
+                "version_normalized": "3.4.5.0"
+            }
+        ]"#;
+
+        let shopware_json = r#"[
+            {
+                "version": "v6.6.10.10",
+                "version_normalized": "6.6.10.10",
+                "require": {"php": "~8.2.0 || ~8.3.0 || ~8.4.0", "shopware/core": "v6.6.10.10"}
+            },
+            {
+                "version": "v6.6.10.9",
+                "version_normalized": "6.6.10.9"
+            }
+        ]"#;
+
+        let doctrine_versions: Vec<PackagistVersion> = serde_json::from_str(doctrine_json).unwrap();
+        let shopware_versions: Vec<PackagistVersion> = serde_json::from_str(shopware_json).unwrap();
+
+        // Expand each package separately (as the real code does)
+        let doctrine_expanded = ComposerRepository::expand_minified_versions(&doctrine_versions);
+        let shopware_expanded = ComposerRepository::expand_minified_versions(&shopware_versions);
+
+        // Doctrine should never have shopware/core
+        for v in &doctrine_expanded {
+            assert!(
+                !v.require.as_ref().unwrap().contains_key("shopware/core"),
+                "doctrine/dbal {} should NOT have shopware/core requirement", v.version
+            );
+        }
+
+        // Shopware should have shopware/core
+        for v in &shopware_expanded {
+            assert!(
+                v.require.as_ref().unwrap().contains_key("shopware/core"),
+                "shopware/storefront {} should have shopware/core requirement", v.version
+            );
+        }
+    }
+
+    /// Test handling of null values in JSON (explicit null vs missing field)
+    #[test]
+    fn test_expand_minified_null_handling() {
+        // In Packagist v2, null means "inherit from previous"
+        // but an explicit empty object {} means "this version has no requirements"
+        let json = r#"[
+            {
+                "version": "2.0.0",
+                "version_normalized": "2.0.0.0",
+                "require": {"php": ">=8.0"},
+                "description": "Has requirements"
+            },
+            {
+                "version": "1.0.0",
+                "version_normalized": "1.0.0.0",
+                "require": null,
+                "description": null
+            }
+        ]"#;
+
+        let versions: Vec<PackagistVersion> = serde_json::from_str(json).unwrap();
+        let expanded = ComposerRepository::expand_minified_versions(&versions);
+
+        assert_eq!(expanded.len(), 2);
+
+        // v1.0.0 should inherit from v2.0.0 because require is null
+        assert_eq!(expanded[1].require.as_ref().unwrap().get("php").unwrap(), ">=8.0");
+        assert_eq!(expanded[1].description.as_ref().unwrap(), "Has requirements");
+    }
+
+    /// Test the full parse flow with a mock response
+    #[test]
+    fn test_parse_packagist_response_isolates_packages() {
+        // This simulates what happens when we parse a response
+        // Each package name should be processed independently
+        let response_json = r#"{
+            "packages": {
+                "vendor/package-a": [
+                    {
+                        "version": "1.0.0",
+                        "version_normalized": "1.0.0.0",
+                        "require": {"php": ">=7.4", "vendor/dep-a": "^1.0"}
+                    }
+                ],
+                "vendor/package-b": [
+                    {
+                        "version": "2.0.0",
+                        "version_normalized": "2.0.0.0",
+                        "require": {"php": ">=8.0", "vendor/dep-b": "^2.0"}
+                    }
+                ]
+            }
+        }"#;
+
+        let response: PackagistResponse = serde_json::from_str(response_json).unwrap();
+
+        // Process package-a
+        let versions_a = response.packages.get("vendor/package-a").unwrap();
+        let expanded_a = ComposerRepository::expand_minified_versions(versions_a);
+
+        // Process package-b
+        let versions_b = response.packages.get("vendor/package-b").unwrap();
+        let expanded_b = ComposerRepository::expand_minified_versions(versions_b);
+
+        // Verify no cross-contamination
+        assert!(expanded_a[0].require.as_ref().unwrap().contains_key("vendor/dep-a"));
+        assert!(!expanded_a[0].require.as_ref().unwrap().contains_key("vendor/dep-b"));
+
+        assert!(expanded_b[0].require.as_ref().unwrap().contains_key("vendor/dep-b"));
+        assert!(!expanded_b[0].require.as_ref().unwrap().contains_key("vendor/dep-a"));
+    }
 }

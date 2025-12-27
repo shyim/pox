@@ -685,4 +685,35 @@ mod tests {
         assert_eq!(package.name(), deserialized.name());
         assert_eq!(package.version(), deserialized.version());
     }
+
+    #[test]
+    fn test_pretty_version_defaults_to_version() {
+        let package = Package::new("vendor/package", "1.0.0.0");
+        assert_eq!(package.pretty_version(), "1.0.0.0");
+    }
+
+    #[test]
+    fn test_pretty_version_with_explicit_value() {
+        let mut package = Package::new("vendor/package", "1.0.0.0");
+        package.pretty_version = Some("v1.0.0".to_string());
+        assert_eq!(package.pretty_version(), "v1.0.0");
+        assert_eq!(package.version(), "1.0.0.0");
+    }
+
+    #[test]
+    fn test_pretty_version_formats() {
+        let test_cases = [
+            ("1.0.0.0", "1.0.0"),
+            ("1.0.0.0", "v1.0.0"),
+            ("2.3.4.0", "2.3.4"),
+            ("1.0.0.0", "1.0"),
+            ("9999999.0.0.0-dev", "dev-main"),
+        ];
+
+        for (normalized, pretty) in test_cases {
+            let mut package = Package::new("vendor/package", normalized);
+            package.pretty_version = Some(pretty.to_string());
+            assert_eq!(package.pretty_version(), pretty);
+        }
+    }
 }

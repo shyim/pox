@@ -782,4 +782,20 @@ mod tests {
         assert!(c.lower_bound().is_zero());
         assert!(c.upper_bound().is_positive_infinity());
     }
+
+    #[test]
+    fn test_dev_version_suffix_matches_constraint() {
+        // This is how Composer represents branch versions like 6.7.x-dev
+        // 6.7.9999999.9999999-dev should match >=6.7.2.0
+
+        // Direct version comparison
+        assert!(php_version_compare("6.7.9999999.9999999-dev", "6.7.2.0", ">="),
+            "6.7.9999999.9999999-dev should be >= 6.7.2.0");
+
+        // Through constraint matching
+        let require = Constraint::new(Operator::GreaterThanOrEqual, "6.7.2.0".to_string()).unwrap();
+        let provide = Constraint::new(Operator::Equal, "6.7.9999999.9999999-dev".to_string()).unwrap();
+        assert!(require.match_specific(&provide, false),
+            ">=6.7.2.0 should match =6.7.9999999.9999999-dev");
+    }
 }

@@ -1332,7 +1332,7 @@ mod tests {
     fn test_platform_package_matching_without_dev_stability() {
         // Use default stability (stable) to match what installer uses
         let mut pool = Pool::new();
-        
+
         // Add PHP 8.5.1-dev as a platform package (using add_platform_package)
         let id = pool.add_platform_package(Package::new("php", "8.5.1-dev"));
 
@@ -1342,6 +1342,25 @@ mod tests {
 
         // Test what_provides with >=8.2 - should find the PHP package
         let matches = pool.what_provides("php", Some(">=8.2"));
-        
+
         assert_eq!(matches.len(), 1, "PHP 8.5.1-dev should match >=8.2 even with default (stable) pool");
+    }
+
+    #[test]
+    fn test_root_package_replace_with_dev_version() {
+        // Simulates Shopware's setup where root package replaces shopware/core with a dev version
+        let mut pool = Pool::new();
+
+        // Create root package that replaces shopware/core with =6.7.9999999.9999999-dev
+        let mut root_pkg = Package::new("shopware/platform", "6.7.9999999.9999999-dev");
+        root_pkg.replace.insert("shopware/core".to_string(), "=6.7.9999999.9999999-dev".to_string());
+
+        // Add root package as platform package (bypasses stability filtering)
+        pool.add_platform_package(root_pkg);
+
+        // Another package requires shopware/core >=6.7.2.0
+        // The root package should provide it via replace
+        let providers = pool.what_provides("shopware/core", Some(">=6.7.2.0"));
+
+        assert_eq!(providers.len(), 1, "Root package should provide shopware/core >=6.7.2.0 via replace");
     }
