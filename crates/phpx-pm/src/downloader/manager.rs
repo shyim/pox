@@ -126,15 +126,17 @@ impl DownloadManager {
         })
     }
 
-    /// Download multiple packages
+    /// Download multiple packages in parallel
     pub async fn download_many(&self, packages: &[Package]) -> Vec<Result<DownloadResult>> {
-        let mut results = Vec::with_capacity(packages.len());
+        use futures_util::stream::{self, StreamExt};
 
-        for package in packages {
-            results.push(self.download(package).await);
-        }
+        const MAX_CONCURRENT_DOWNLOADS: usize = 10;
 
-        results
+        stream::iter(packages)
+            .map(|package| self.download(package))
+            .buffer_unordered(MAX_CONCURRENT_DOWNLOADS)
+            .collect()
+            .await
     }
 
     /// Download from dist (archive)

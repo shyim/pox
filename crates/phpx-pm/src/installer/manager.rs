@@ -3,6 +3,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use futures_util::stream::{self, StreamExt};
+
 use crate::downloader::{DownloadConfig, DownloadManager};
 use crate::http::HttpClient;
 use crate::package::Package;
@@ -51,10 +53,12 @@ impl Default for InstallConfig {
     }
 }
 
+const MAX_CONCURRENT_INSTALLS: usize = 10;
+
 /// Installation manager
 pub struct InstallationManager {
-    library_installer: LibraryInstaller,
-    binary_installer: BinaryInstaller,
+    library_installer: Arc<LibraryInstaller>,
+    binary_installer: Arc<BinaryInstaller>,
     metapackage_installer: MetapackageInstaller,
     config: InstallConfig,
 }
@@ -84,15 +88,15 @@ impl InstallationManager {
 
         let download_manager = Arc::new(DownloadManager::new(http_client, download_config));
 
-        let library_installer = LibraryInstaller::new(
+        let library_installer = Arc::new(LibraryInstaller::new(
             download_manager,
             config.vendor_dir.clone(),
-        );
+        ));
 
-        let binary_installer = BinaryInstaller::new(
+        let binary_installer = Arc::new(BinaryInstaller::new(
             config.bin_dir.clone(),
             config.vendor_dir.clone(),
-        );
+        ));
 
         let metapackage_installer = MetapackageInstaller::new();
 
@@ -137,99 +141,119 @@ impl InstallationManager {
         // Create vendor directory
         tokio::fs::create_dir_all(&self.config.vendor_dir).await?;
 
-        // Process operations in order
+        // Separate operations into phases for parallel execution:
+        // 1. Uninstalls must happen first (sequential - usually few)
+        // 2. Updates can be parallelized (remove old, install new)
+        // 3. Installs can be parallelized
+
+        let mut uninstalls = Vec::new();
+        let mut updates = Vec::new();
+        let mut installs = Vec::new();
+
         for op in &transaction.operations {
             match op {
-                Operation::Install(pkg) => {
-                    // Skip platform packages (php, ext-*)
-                    if pkg.is_platform_package() {
-                        continue;
-                    }
-
-                    // Handle metapackages specially - they have no files
-                    if pkg.is_metapackage() {
-                        self.metapackage_installer.install(pkg).await?;
-                        result.installed.push(pkg.as_ref().clone());
-                        continue;
-                    }
-
-                    let installed = self.install_package(pkg).await?;
-                    if installed {
-                        let bins = self.binary_installer.install(pkg).await?;
-                        result.binaries.extend(bins);
-                        result.installed.push(pkg.as_ref().clone());
+                Operation::Uninstall(pkg) => {
+                    if !pkg.is_platform_package() {
+                        uninstalls.push(pkg.clone());
                     }
                 }
                 Operation::Update { from, to } => {
-                    // Skip platform packages
-                    if to.is_platform_package() {
-                        continue;
+                    if !to.is_platform_package() {
+                        updates.push((from.clone(), to.clone()));
                     }
+                }
+                Operation::Install(pkg) => {
+                    if !pkg.is_platform_package() {
+                        installs.push(pkg.clone());
+                    }
+                }
+                Operation::MarkUnneeded(_)
+                | Operation::MarkAliasInstalled(_)
+                | Operation::MarkAliasUninstalled(_) => {}
+            }
+        }
 
-                    // Handle metapackage updates
+        // Phase 1: Process uninstalls (sequential, usually few)
+        for pkg in &uninstalls {
+            if pkg.is_metapackage() {
+                self.metapackage_installer.uninstall(pkg).await?;
+            } else {
+                self.binary_installer.uninstall(pkg).await?;
+                self.uninstall_package(pkg).await?;
+            }
+            result.removed.push(pkg.as_ref().clone());
+        }
+
+        // Phase 2: Process updates in parallel
+        let update_results: Vec<_> = stream::iter(updates.iter())
+            .map(|(from, to)| {
+                let library_installer = self.library_installer.clone();
+                let binary_installer = self.binary_installer.clone();
+                async move {
+                    // Handle metapackage transitions
                     if to.is_metapackage() {
-                        // If upgrading from a regular package to metapackage, remove old files
                         if !from.is_metapackage() {
-                            self.binary_installer.uninstall(from).await?;
-                            self.uninstall_package(from).await?;
+                            binary_installer.uninstall(from).await?;
+                            library_installer.uninstall(from).await?;
                         }
-                        self.metapackage_installer.update(from, to).await?;
-                        result.updated.push((from.as_ref().clone(), to.as_ref().clone()));
-                        continue;
+                        // Metapackages have no files to install
+                        return Ok::<_, crate::ComposerError>((from.clone(), to.clone(), Vec::new()));
                     }
 
-                    // If downgrading from metapackage to regular, just install
                     if from.is_metapackage() {
-                        self.install_package(to).await?;
-                        let bins = self.binary_installer.install(to).await?;
-                        result.binaries.extend(bins);
-                        result.updated.push((from.as_ref().clone(), to.as_ref().clone()));
-                        continue;
+                        // Downgrading from metapackage to regular
+                        library_installer.install(to).await?;
+                    } else {
+                        // Regular update
+                        library_installer.update(from, to).await?;
+                        binary_installer.uninstall(from).await?;
                     }
-
-                    self.update_package(from, to).await?;
-                    self.binary_installer.uninstall(from).await?;
-                    let bins = self.binary_installer.install(to).await?;
-                    result.binaries.extend(bins);
-                    result.updated.push((from.as_ref().clone(), to.as_ref().clone()));
+                    let bins = binary_installer.install(to).await?;
+                    Ok((from.clone(), to.clone(), bins))
                 }
-                Operation::Uninstall(pkg) => {
-                    // Skip platform packages
-                    if pkg.is_platform_package() {
-                        continue;
-                    }
+            })
+            .buffer_unordered(MAX_CONCURRENT_INSTALLS)
+            .collect()
+            .await;
 
-                    // Metapackages have no files to remove
+        for update_result in update_results {
+            let (from, to, bins) = update_result?;
+            result.updated.push((from.as_ref().clone(), to.as_ref().clone()));
+            result.binaries.extend(bins);
+        }
+
+        // Phase 3: Process installs in parallel
+        let install_results: Vec<_> = stream::iter(installs.iter())
+            .map(|pkg| {
+                let library_installer = self.library_installer.clone();
+                let binary_installer = self.binary_installer.clone();
+                async move {
                     if pkg.is_metapackage() {
-                        self.metapackage_installer.uninstall(pkg).await?;
-                        result.removed.push(pkg.as_ref().clone());
-                        continue;
+                        // Metapackages have no files
+                        return Ok::<_, crate::ComposerError>((pkg.clone(), Vec::new(), false));
                     }
 
-                    self.binary_installer.uninstall(pkg).await?;
-                    self.uninstall_package(pkg).await?;
-                    result.removed.push(pkg.as_ref().clone());
+                    let download_result = library_installer.install(pkg).await?;
+                    if download_result.skipped {
+                        return Ok((pkg.clone(), Vec::new(), true));
+                    }
+                    let bins = binary_installer.install(pkg).await?;
+                    Ok((pkg.clone(), bins, false))
                 }
-                Operation::MarkUnneeded(_) => {}
-                // Alias operations don't need any file system changes
-                Operation::MarkAliasInstalled(_) | Operation::MarkAliasUninstalled(_) => {}
+            })
+            .buffer_unordered(MAX_CONCURRENT_INSTALLS)
+            .collect()
+            .await;
+
+        for install_result in install_results {
+            let (pkg, bins, skipped) = install_result?;
+            if !skipped {
+                result.installed.push(pkg.as_ref().clone());
+                result.binaries.extend(bins);
             }
         }
 
         Ok(result)
-    }
-
-    /// Install a single package
-    /// Returns true if actually installed, false if skipped (already installed)
-    async fn install_package(&self, package: &Package) -> Result<bool> {
-        let result = self.library_installer.install(package).await?;
-        Ok(!result.skipped)
-    }
-
-    /// Update a package
-    async fn update_package(&self, from: &Package, to: &Package) -> Result<()> {
-        self.library_installer.update(from, to).await?;
-        Ok(())
     }
 
     /// Uninstall a package
@@ -254,23 +278,46 @@ impl InstallationManager {
         // Create vendor directory
         tokio::fs::create_dir_all(&self.config.vendor_dir).await?;
 
+        // Filter out platform packages and separate metapackages
+        let mut metapackages = Vec::new();
+        let mut regular_packages = Vec::new();
+
         for package in packages {
-            // Skip platform packages
             if package.is_platform_package() {
                 continue;
             }
-
-            // Handle metapackages
             if package.is_metapackage() {
-                self.metapackage_installer.install(package).await?;
-                result.installed.push(package.clone());
-                continue;
+                metapackages.push(package);
+            } else {
+                regular_packages.push(package);
             }
+        }
 
-            self.install_package(package).await?;
-            let bins = self.binary_installer.install(package).await?;
-            result.binaries.extend(bins);
+        // Handle metapackages (no files, quick)
+        for package in metapackages {
+            self.metapackage_installer.install(package).await?;
             result.installed.push(package.clone());
+        }
+
+        // Install regular packages in parallel
+        let install_results: Vec<_> = stream::iter(regular_packages.iter())
+            .map(|package| {
+                let library_installer = self.library_installer.clone();
+                let binary_installer = self.binary_installer.clone();
+                async move {
+                    library_installer.install(package).await?;
+                    let bins = binary_installer.install(package).await?;
+                    Ok::<_, crate::ComposerError>(((*package).clone(), bins))
+                }
+            })
+            .buffer_unordered(MAX_CONCURRENT_INSTALLS)
+            .collect()
+            .await;
+
+        for install_result in install_results {
+            let (pkg, bins) = install_result?;
+            result.installed.push(pkg);
+            result.binaries.extend(bins);
         }
 
         Ok(result)
