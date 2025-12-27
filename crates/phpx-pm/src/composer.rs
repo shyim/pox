@@ -3,8 +3,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use crate::config::{Config, PreferredInstall};
+use crate::event::EventDispatcher;
 use crate::http::HttpClient;
 use crate::json::{ComposerJson, ComposerLock, Repository as JsonRepository, Repositories};
+use crate::plugin::register_plugins;
 use crate::repository::{ComposerRepository, RepositoryManager, Repository};
 use crate::installer::InstallationManager;
 use crate::installer::InstallConfig;
@@ -19,6 +21,7 @@ pub struct Composer {
     pub http_client: Arc<HttpClient>,
     pub working_dir: PathBuf,
     pub platform_packages: Vec<crate::package::Package>,
+    pub event_dispatcher: EventDispatcher,
 }
 
 impl Composer {
@@ -39,6 +42,16 @@ impl Composer {
             .with_composer_json(composer_json)
             .with_composer_lock(composer_lock)
             .build()
+    }
+
+    /// Dispatch a typed event and return the exit code.
+    pub fn dispatch<E: crate::event::ComposerEvent>(&self, event: &E) -> anyhow::Result<i32> {
+        self.event_dispatcher.dispatch(event, self)
+    }
+
+    /// Get the vendor directory path.
+    pub fn vendor_dir(&self) -> std::path::PathBuf {
+        self.working_dir.join(&self.config.vendor_dir)
     }
 }
 
@@ -179,6 +192,10 @@ impl ComposerBuilder {
             install_config,
         ));
 
+        // Create event dispatcher with script listeners and plugins
+        let mut event_dispatcher = EventDispatcher::with_scripts();
+        register_plugins(&mut event_dispatcher);
+
         Ok(Composer {
             config,
             composer_json,
@@ -188,6 +205,7 @@ impl ComposerBuilder {
             http_client,
             working_dir: self.working_dir.clone(),
             platform_packages: std::mem::take(&mut self.platform_packages),
+            event_dispatcher,
         })
     }
 

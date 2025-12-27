@@ -6,12 +6,16 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
 
+use crate::composer::Composer;
+use crate::event::{ComposerEvent, EventListener, EventType, PostAutoloadDumpEvent};
 use crate::json::ComposerJson;
 use crate::package::Package;
 use crate::Result;
 
-use super::registry::ComposerPlugin;
+/// The package name that triggers this plugin.
+pub const PACKAGE_NAME: &str = "bamarni/composer-bin-plugin";
 
 /// Configuration for the bin plugin from composer.json extra.bamarni-bin
 #[derive(Debug, Clone)]
@@ -57,20 +61,47 @@ impl BinConfig {
     }
 }
 
-/// Composer bin plugin.
+/// Composer bin plugin - implements EventListener directly.
 pub struct ComposerBinPlugin;
 
-impl ComposerPlugin for ComposerBinPlugin {
-    fn package_name(&self) -> &str {
-        "bamarni/composer-bin-plugin"
+impl EventListener for ComposerBinPlugin {
+    fn handle(&self, event: &dyn ComposerEvent, composer: &Composer) -> anyhow::Result<i32> {
+        if event.event_type() != EventType::PostAutoloadDump {
+            return Ok(0);
+        }
+
+        let Some(e) = event.as_any().downcast_ref::<PostAutoloadDumpEvent>() else {
+            return Ok(0);
+        };
+
+        // Check if our package is installed
+        let is_installed = e.packages.iter().any(|p| p.name == PACKAGE_NAME);
+        if !is_installed {
+            return Ok(0);
+        }
+
+        self.post_autoload_dump(
+            &composer.vendor_dir(),
+            &composer.working_dir,
+            &composer.composer_json,
+            &e.packages,
+        )?;
+
+        Ok(0)
     }
 
+    fn priority(&self) -> i32 {
+        -10
+    }
+}
+
+impl ComposerBinPlugin {
     fn post_autoload_dump(
         &self,
         vendor_dir: &Path,
         project_dir: &Path,
         composer_json: &ComposerJson,
-        _installed_packages: &[Package],
+        _installed_packages: &[Arc<Package>],
     ) -> Result<()> {
         let config = BinConfig::from_extra(&composer_json.extra);
 

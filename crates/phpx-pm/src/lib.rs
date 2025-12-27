@@ -4,6 +4,7 @@ pub mod composer;
 pub mod config;
 pub mod downloader;
 pub mod error;
+pub mod event;
 pub mod http;
 pub mod installer;
 pub mod json;
@@ -22,7 +23,12 @@ pub use solver::{Pool, Request, Solver, Policy, Transaction};
 pub use downloader::{DownloadManager, DownloadResult};
 pub use installer::{InstallationManager, InstallConfig};
 pub use autoload::{AutoloadGenerator, AutoloadConfig};
-pub use plugin::PluginRegistry;
+pub use plugin::{register_plugins, BinConfig};
 pub use composer::{Composer, ComposerBuilder};
+pub use event::{
+    ComposerEvent, EventDispatcher, EventListener, EventType,
+    PostAutoloadDumpEvent, PostInstallEvent, PostUpdateEvent,
+    PreAutoloadDumpEvent, PreInstallEvent, PreUpdateEvent,
+};
 pub use util::is_platform_package;
 #[cfg(test)] mod test_content_hash;

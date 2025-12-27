@@ -6,12 +6,16 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
+use crate::composer::Composer;
+use crate::event::{ComposerEvent, EventListener, EventType, PostAutoloadDumpEvent};
 use crate::json::ComposerJson;
 use crate::package::Package;
 use crate::Result;
 
-use super::registry::ComposerPlugin;
+/// The package name that triggers this plugin.
+pub const PACKAGE_NAME: &str = "phpstan/extension-installer";
 
 /// The generated PHP config file template
 const GENERATED_CONFIG_TEMPLATE: &str = r#"<?php declare(strict_types = 1);
@@ -47,20 +51,45 @@ const IGNORED_PHPSTAN_PACKAGES: &[&str] = &[
     "phpstan/extension-installer",
 ];
 
-/// PHPStan Extension Installer plugin.
+/// PHPStan Extension Installer plugin - implements EventListener directly.
 pub struct PhpstanExtensionInstallerPlugin;
 
-impl ComposerPlugin for PhpstanExtensionInstallerPlugin {
-    fn package_name(&self) -> &str {
-        "phpstan/extension-installer"
+impl EventListener for PhpstanExtensionInstallerPlugin {
+    fn handle(&self, event: &dyn ComposerEvent, composer: &Composer) -> anyhow::Result<i32> {
+        if event.event_type() != EventType::PostAutoloadDump {
+            return Ok(0);
+        }
+
+        let Some(e) = event.as_any().downcast_ref::<PostAutoloadDumpEvent>() else {
+            return Ok(0);
+        };
+
+        // Check if our package is installed
+        let is_installed = e.packages.iter().any(|p| p.name == PACKAGE_NAME);
+        if !is_installed {
+            return Ok(0);
+        }
+
+        self.post_autoload_dump(
+            &composer.vendor_dir(),
+            &composer.composer_json,
+            &e.packages,
+        )?;
+
+        Ok(0)
     }
 
+    fn priority(&self) -> i32 {
+        -10
+    }
+}
+
+impl PhpstanExtensionInstallerPlugin {
     fn post_autoload_dump(
         &self,
         vendor_dir: &Path,
-        _project_dir: &Path,
         composer_json: &ComposerJson,
-        installed_packages: &[Package],
+        installed_packages: &[Arc<Package>],
     ) -> Result<()> {
         // Get ignore list from composer.json extra
         let ignore_list = get_ignore_list(&composer_json.extra);

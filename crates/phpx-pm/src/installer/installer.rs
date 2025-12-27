@@ -7,12 +7,14 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tokio::task::JoinSet;
 
 use crate::composer::Composer;
+use crate::event::{
+    PostAutoloadDumpEvent, PostInstallEvent, PostUpdateEvent,
+    PreAutoloadDumpEvent, PreInstallEvent, PreUpdateEvent,
+};
 use crate::json::{ComposerLock, ComposerJson, LockedPackage};
 use crate::package::{Package, Stability, Autoload, detect_root_version, RootVersion};
 use crate::solver::{Pool, Policy, Request, Solver};
 use crate::autoload::{AutoloadConfig, AutoloadGenerator, PackageAutoload, RootPackageInfo, get_head_commit};
-use crate::plugin::PluginRegistry;
-use crate::scripts;
 use crate::util::is_platform_package;
 
 pub struct Installer {
@@ -39,6 +41,12 @@ impl Installer {
 
         if dry_run {
             println!("{} Running in dry-run mode", style("Info:").cyan());
+        }
+
+        // Dispatch pre-update event
+        let exit_code = self.composer.dispatch(&PreUpdateEvent::new(!no_dev))?;
+        if exit_code != 0 {
+            return Ok(exit_code);
         }
 
         // Create progress spinner
@@ -407,17 +415,24 @@ impl Installer {
              generator.generate(&package_autoloads, root_autoload.as_ref(), Some(&root_package))
                  .context("Failed to generate autoloader")?;
 
-             // Plugins
-             let plugin_registry = PluginRegistry::new();
-             plugin_registry.run_post_autoload_dump(
-                 &manager.config().vendor_dir,
-                 working_dir,
-                 composer_json,
-                 &packages
-             ).context("Failed to run plugin hooks")?;
+             // Dispatch post-autoload-dump event (runs scripts and plugins)
+             let arc_packages: Vec<Arc<Package>> = packages.iter().map(|p| Arc::new(p.clone())).collect();
+             let event = PostAutoloadDumpEvent::new(arc_packages, !no_dev, optimize_autoloader);
+             let exit_code = self.composer.dispatch(&event)?;
+             if exit_code != 0 {
+                 return Ok(exit_code);
+             }
         }
 
         println!("{} {} packages updated", style("Success:").green().bold(), result.installed.len() + result.updated.len());
+
+        // Dispatch post-update event
+        if !dry_run {
+            let exit_code = self.composer.dispatch(&PostUpdateEvent::new(!no_dev))?;
+            if exit_code != 0 {
+                return Ok(exit_code);
+            }
+        }
 
         Ok(0)
     }
@@ -433,9 +448,9 @@ impl Installer {
         // Detect root package version
         let root_version = get_root_version(working_dir, composer_json);
 
-        // Run pre-install-cmd script
+        // Dispatch pre-install event
         if !no_scripts {
-             let exit_code = scripts::run_event_script("pre-install-cmd", composer_json, working_dir, false)?;
+             let exit_code = self.composer.dispatch(&PreInstallEvent::new(!no_dev))?;
              if exit_code != 0 { return Ok(exit_code); }
         }
 
@@ -469,9 +484,9 @@ impl Installer {
         }
 
         if !dry_run {
-             // Scripts: pre-autoload-dump
+             // Dispatch pre-autoload-dump event
              if !no_scripts {
-                 let exit_code = scripts::run_event_script("pre-autoload-dump", composer_json, working_dir, false)?;
+                 let exit_code = self.composer.dispatch(&PreAutoloadDumpEvent::new(!no_dev, optimize_autoloader))?;
                  if exit_code != 0 { return Ok(exit_code); }
              }
 
@@ -514,26 +529,20 @@ impl Installer {
 
              generator.generate(&package_autoloads, root_autoload.as_ref(), Some(&root_package)).context("Failed to generate autoloader")?;
 
-             // Plugins
-             let plugin_registry = PluginRegistry::new();
-             plugin_registry.run_post_autoload_dump(
-                 &manager.config().vendor_dir,
-                 working_dir,
-                 composer_json,
-                 &packages
-             ).context("Failed to run plugin hooks")?;
-
-             // Scripts: post-autoload-dump
+             // Dispatch post-autoload-dump event (runs scripts and plugins)
              if !no_scripts {
-                 let exit_code = scripts::run_event_script("post-autoload-dump", composer_json, working_dir, false)?;
+                 let arc_packages: Vec<Arc<Package>> = packages.iter().map(|p| Arc::new(p.clone())).collect();
+                 let event = PostAutoloadDumpEvent::new(arc_packages, dev_mode, optimize_autoloader);
+                 let exit_code = self.composer.dispatch(&event)?;
                  if exit_code != 0 { return Ok(exit_code); }
              }
         }
 
         println!("{} {} packages installed", style("Success:").green().bold(), result.installed.len());
 
+        // Dispatch post-install event
         if !no_scripts && !dry_run {
-             let exit_code = scripts::run_event_script("post-install-cmd", composer_json, working_dir, false)?;
+             let exit_code = self.composer.dispatch(&PostInstallEvent::new(!no_dev))?;
              if exit_code != 0 { return Ok(exit_code); }
         }
 
@@ -605,14 +614,10 @@ impl Installer {
 
         generator.generate(&package_autoloads, root_autoload.as_ref(), Some(&root_package)).context("Failed to generate autoloader")?;
 
-        // Plugins
-        let plugin_registry = PluginRegistry::new();
-        plugin_registry.run_post_autoload_dump(
-            &manager.config().vendor_dir,
-            working_dir,
-            composer_json,
-            &all_installed_packages
-        ).context("Failed to run plugin hooks")?;
+        // Dispatch post-autoload-dump event (runs scripts and plugins)
+        let arc_packages: Vec<Arc<Package>> = all_installed_packages.iter().map(|p| Arc::new(p.clone())).collect();
+        let event = PostAutoloadDumpEvent::new(arc_packages, dev_mode, optimize || authoritative);
+        self.composer.dispatch(&event)?;
 
         if optimize || authoritative {
             println!("{} Generated optimized autoload files", style("Success:").green().bold());

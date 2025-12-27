@@ -6,11 +6,13 @@
 
 use std::path::Path;
 
+use crate::composer::Composer;
+use crate::event::{ComposerEvent, EventListener, EventType, PostAutoloadDumpEvent};
 use crate::json::ComposerJson;
-use crate::package::Package;
 use crate::Result;
 
-use super::registry::ComposerPlugin;
+/// The package name that triggers this plugin.
+pub const PACKAGE_NAME: &str = "symfony/runtime";
 
 /// The autoload_runtime.php template.
 /// This matches the template from symfony/runtime.
@@ -44,20 +46,45 @@ exit(
 );
 "#;
 
-/// Symfony Runtime plugin.
+/// Symfony Runtime plugin - implements EventListener directly.
 pub struct SymfonyRuntimePlugin;
 
-impl ComposerPlugin for SymfonyRuntimePlugin {
-    fn package_name(&self) -> &str {
-        "symfony/runtime"
+impl EventListener for SymfonyRuntimePlugin {
+    fn handle(&self, event: &dyn ComposerEvent, composer: &Composer) -> anyhow::Result<i32> {
+        if event.event_type() != EventType::PostAutoloadDump {
+            return Ok(0);
+        }
+
+        let Some(e) = event.as_any().downcast_ref::<PostAutoloadDumpEvent>() else {
+            return Ok(0);
+        };
+
+        // Check if our package is installed
+        let is_installed = e.packages.iter().any(|p| p.name == PACKAGE_NAME);
+        if !is_installed {
+            return Ok(0);
+        }
+
+        self.post_autoload_dump(
+            &composer.vendor_dir(),
+            &composer.working_dir,
+            &composer.composer_json,
+        )?;
+
+        Ok(0)
     }
 
+    fn priority(&self) -> i32 {
+        -10
+    }
+}
+
+impl SymfonyRuntimePlugin {
     fn post_autoload_dump(
         &self,
         vendor_dir: &Path,
         project_dir: &Path,
         composer_json: &ComposerJson,
-        _installed_packages: &[Package],
     ) -> Result<()> {
         let autoload_file = vendor_dir.join("autoload.php");
 
@@ -130,9 +157,7 @@ impl ComposerPlugin for SymfonyRuntimePlugin {
 
         Ok(())
     }
-}
 
-impl SymfonyRuntimePlugin {
     /// Calculate the PHP code for project_dir relative to vendor_dir.
     fn calculate_project_dir_code(&self, vendor_dir: &Path, project_dir: &Path) -> Result<String> {
         // Get canonical paths for comparison
