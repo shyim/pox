@@ -48,6 +48,7 @@
 //! ```
 
 mod pool;
+mod pool_builder;
 mod pool_optimizer;
 mod request;
 mod rule;
@@ -64,6 +65,7 @@ mod policy;
 mod tests;
 
 pub use pool::{Pool, PoolBuilder, PoolEntry, PackageId};
+pub use pool_builder::PoolBuilder as LazyPoolBuilder;
 pub use pool_optimizer::PoolOptimizer;
 pub use request::Request;
 pub use rule::{Rule, RuleType, Literal};

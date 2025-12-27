@@ -638,6 +638,75 @@ impl Repository for ComposerRepository {
     async fn get_providers(&self, _package_name: &str) -> Vec<ProviderInfo> {
         Vec::new()
     }
+
+    /// Optimized batch loading with concurrent HTTP requests.
+    async fn load_packages_batch(
+        &self,
+        packages: &[(String, Option<String>)],
+    ) -> super::traits::LoadResult {
+        use futures_util::stream::{self, StreamExt};
+        use super::traits::LoadResult;
+
+        const MAX_CONCURRENT: usize = 50;
+
+        let mut result = LoadResult {
+            packages: Vec::new(),
+            names_found: Vec::new(),
+        };
+
+        if packages.is_empty() {
+            return result;
+        }
+
+        // Fetch all packages concurrently
+        let fetched: Vec<(String, Option<String>, Vec<Arc<Package>>)> = stream::iter(packages.iter().cloned())
+            .map(|(name, constraint)| {
+                let name_clone = name.clone();
+                async move {
+                    let pkgs = self.load_package_metadata(&name_clone).await.unwrap_or_default();
+                    (name, constraint, pkgs)
+                }
+            })
+            .buffer_unordered(MAX_CONCURRENT)
+            .collect()
+            .await;
+
+        // Process results and apply constraint filtering
+        let parser = VersionParser::new();
+        for (name, constraint, pkgs) in fetched {
+            if pkgs.is_empty() {
+                continue;
+            }
+
+            result.names_found.push(name);
+
+            // Apply constraint filtering if specified
+            let filtered: Vec<Arc<Package>> = if let Some(ref c) = constraint {
+                if c == "*" || c.is_empty() {
+                    pkgs
+                } else if let Ok(parsed_constraint) = parser.parse_constraints(c) {
+                    pkgs.into_iter()
+                        .filter(|pkg| {
+                            let normalized = parser.normalize(&pkg.version)
+                                .unwrap_or_else(|_| pkg.version.clone());
+                            match Constraint::new(Operator::Equal, normalized) {
+                                Ok(vc) => parsed_constraint.matches(&vc),
+                                Err(_) => true,
+                            }
+                        })
+                        .collect()
+                } else {
+                    pkgs
+                }
+            } else {
+                pkgs
+            };
+
+            result.packages.extend(filtered);
+        }
+
+        result
+    }
 }
 
 /// Packagist API response for package metadata

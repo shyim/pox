@@ -83,6 +83,37 @@ pub trait Repository: Send + Sync {
     async fn count(&self) -> usize {
         self.get_packages().await.len()
     }
+
+    /// Load multiple packages by name with constraints (batch loading).
+    ///
+    /// This is more efficient than calling `find_packages_with_constraint` multiple times
+    /// as it allows repositories to optimize fetching (e.g., parallel HTTP requests).
+    ///
+    /// Returns packages found and names that were definitively found (to skip lower-priority repos).
+    async fn load_packages_batch(
+        &self,
+        packages: &[(String, Option<String>)], // (name, optional constraint)
+    ) -> LoadResult {
+        let mut result = LoadResult {
+            packages: Vec::new(),
+            names_found: Vec::new(),
+        };
+
+        for (name, constraint) in packages {
+            let found = if let Some(c) = constraint {
+                self.find_packages_with_constraint(name, c).await
+            } else {
+                self.find_packages(name).await
+            };
+
+            if !found.is_empty() {
+                result.names_found.push(name.clone());
+                result.packages.extend(found);
+            }
+        }
+
+        result
+    }
 }
 
 /// Writable repository interface - can add/remove packages
