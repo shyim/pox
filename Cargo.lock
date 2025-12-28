@@ -1763,6 +1763,7 @@ dependencies = [
  "notify-debouncer-full",
  "phpx-embed",
  "phpx-pm",
+ "phpx-semver",
  "phpx-spdx",
  "regex",
  "reqwest",

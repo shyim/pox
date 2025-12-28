@@ -2,6 +2,7 @@ pub mod autoload;
 pub mod cache;
 pub mod composer;
 pub mod config;
+pub mod dependency_graph;
 pub mod downloader;
 pub mod error;
 pub mod event;
@@ -25,6 +26,7 @@ pub use installer::{InstallationManager, InstallConfig};
 pub use autoload::{AutoloadGenerator, AutoloadConfig};
 pub use plugin::{register_plugins, BinConfig};
 pub use composer::{Composer, ComposerBuilder};
+pub use dependency_graph::{get_dependents, find_packages_with_replacers_and_providers, DependencyResult};
 pub use event::{
     ComposerEvent, EventDispatcher, EventListener, EventType,
     PostAutoloadDumpEvent, PostInstallEvent, PostUpdateEvent,

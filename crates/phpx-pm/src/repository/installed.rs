@@ -216,6 +216,12 @@ pub struct InstalledPackage {
     #[serde(default, rename = "require-dev")]
     pub require_dev: HashMap<String, String>,
     #[serde(default)]
+    pub conflict: HashMap<String, String>,
+    #[serde(default)]
+    pub replace: HashMap<String, String>,
+    #[serde(default)]
+    pub provide: HashMap<String, String>,
+    #[serde(default)]
     pub autoload: serde_json::Value,
     #[serde(default)]
     pub description: Option<String>,
@@ -277,6 +283,9 @@ impl Package {
         pkg.dist = dist;
         pkg.require = data.require.clone();
         pkg.require_dev = data.require_dev.clone();
+        pkg.conflict = data.conflict.clone();
+        pkg.replace = data.replace.clone();
+        pkg.provide = data.provide.clone();
         pkg.description = data.description.clone();
 
         // Replace self.version constraints with actual version
@@ -309,6 +318,9 @@ impl Package {
             dist,
             require: self.require.clone(),
             require_dev: self.require_dev.clone(),
+            conflict: self.conflict.clone(),
+            replace: self.replace.clone(),
+            provide: self.provide.clone(),
             autoload: serde_json::Value::Null,
             description: self.description.clone(),
             license: serde_json::Value::Null,

@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 phpx-embed = { path = "../phpx-embed" }
 phpx-pm = { path = "../phpx-pm" }
+phpx-semver = { path = "../phpx-semver" }
 phpx-spdx = { path = "../phpx-spdx" }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
