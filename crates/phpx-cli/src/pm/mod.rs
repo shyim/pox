@@ -7,6 +7,7 @@ mod clear_cache;
 pub mod run;
 pub mod platform;
 mod why;
+mod show;
 
 use clap::Subcommand;
 use anyhow::Result;
@@ -17,6 +18,7 @@ pub use dump_autoload::DumpAutoloadArgs;
 pub use clear_cache::ClearCacheArgs;
 pub use run::RunArgs;
 pub use why::WhyArgs;
+pub use show::ShowArgs;
 
 /// Package manager subcommands
 #[derive(Subcommand, Debug)]
@@ -40,6 +42,9 @@ pub enum PmCommands {
 
     #[command(name = "why-not", alias = "prohibits")]
     WhyNot(WhyArgs),
+
+    #[command(alias = "info")]
+    Show(ShowArgs),
 }
 
 /// Execute a package manager command
@@ -51,5 +56,6 @@ pub async fn execute(command: PmCommands) -> Result<i32> {
         PmCommands::ClearCache(args) => clear_cache::execute(args).await,
         PmCommands::Why(args) => why::execute(args, false).await,
         PmCommands::WhyNot(args) => why::execute(args, true).await,
+        PmCommands::Show(args) => show::execute(args).await,
     }
 }
