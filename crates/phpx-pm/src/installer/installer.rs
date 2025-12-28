@@ -4,6 +4,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
+use indexmap::IndexMap;
 
 use crate::composer::Composer;
 use crate::event::{
@@ -377,18 +378,16 @@ impl Installer {
         log::info!("Lock file operations: {} installs, {} updates, {} removals",
             install_count, update_count, removal_count);
 
-        let mut platform_reqs: HashMap<String, String> = HashMap::new();
-        let mut platform_dev_reqs: HashMap<String, String> = HashMap::new();
-        for (name, constraint) in &composer_json.require {
-            if is_platform_package(name) {
-                platform_reqs.insert(name.clone(), constraint.clone());
-            }
-        }
-        for (name, constraint) in &composer_json.require_dev {
-            if is_platform_package(name) {
-                platform_dev_reqs.insert(name.clone(), constraint.clone());
-            }
-        }
+        // Extract platform requirements while preserving order from composer.json
+        let platform_reqs: IndexMap<String, String> = composer_json.require.iter()
+            .filter(|(name, _)| is_platform_package(name))
+            .map(|(name, constraint)| (name.clone(), constraint.clone()))
+            .collect();
+
+        let platform_dev_reqs: IndexMap<String, String> = composer_json.require_dev.iter()
+            .filter(|(name, _)| is_platform_package(name))
+            .map(|(name, constraint)| (name.clone(), constraint.clone()))
+            .collect();
 
         let lock = ComposerLock {
             content_hash: compute_content_hash(composer_json),
@@ -399,7 +398,7 @@ impl Installer {
             prefer_lowest,
             platform: platform_reqs,
             platform_dev: platform_dev_reqs,
-            plugin_api_version: "2.6.0".to_string(),
+            plugin_api_version: "2.9.0".to_string(),
             ..Default::default()
         };
 
@@ -407,10 +406,8 @@ impl Installer {
         if lock_file_changed && !dry_run {
             log::debug!("Writing lock file");
             let mut lock_content = serde_json::to_string_pretty(&lock).context("Failed to serialize composer.lock")?;
-            // Composer doesn't add a trailing newline
-            if lock_content.ends_with('\n') {
-                lock_content.pop();
-            }
+            // Add trailing newline to match Composer's format
+            lock_content.push('\n');
             std::fs::write(working_dir.join("composer.lock"), lock_content).context("Failed to write composer.lock")?;
         }
 

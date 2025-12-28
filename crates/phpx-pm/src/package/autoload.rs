@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 /// Autoload configuration for a Composer package
 ///
@@ -13,16 +13,16 @@ pub struct Autoload {
     /// multiple directories.
     ///
     /// Example: `{"App\\": ["src/", "lib/"]}`
-    #[serde(rename = "psr-4", skip_serializing_if = "HashMap::is_empty", default)]
-    pub psr4: HashMap<String, AutoloadPath>,
+    #[serde(rename = "psr-4", skip_serializing_if = "IndexMap::is_empty", default)]
+    pub psr4: IndexMap<String, AutoloadPath>,
 
     /// PSR-0 autoload mapping (legacy)
     ///
     /// Maps namespace prefixes to directories using the older PSR-0 standard.
     ///
     /// Example: `{"Monolog\\": ["src/", "lib/"]}`
-    #[serde(rename = "psr-0", skip_serializing_if = "HashMap::is_empty", default)]
-    pub psr0: HashMap<String, AutoloadPath>,
+    #[serde(rename = "psr-0", skip_serializing_if = "IndexMap::is_empty", default)]
+    pub psr0: IndexMap<String, AutoloadPath>,
 
     /// Classmap autoload
     ///

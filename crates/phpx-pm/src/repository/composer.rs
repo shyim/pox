@@ -903,9 +903,9 @@ struct PackagistDist {
 #[derive(Debug, Clone, Deserialize, Default)]
 struct PackagistAutoload {
     #[serde(rename = "psr-4", default)]
-    psr4: HashMap<String, serde_json::Value>,
+    psr4: IndexMap<String, serde_json::Value>,
     #[serde(rename = "psr-0", default)]
-    psr0: HashMap<String, serde_json::Value>,
+    psr0: IndexMap<String, serde_json::Value>,
     #[serde(default)]
     classmap: Vec<String>,
     #[serde(default)]

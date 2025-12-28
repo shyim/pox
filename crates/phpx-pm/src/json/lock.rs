@@ -142,16 +142,16 @@ pub struct ComposerLock {
     pub prefer_lowest: bool,
 
     /// Platform requirements
-    #[serde(default, skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_map_or_empty_array")]
-    pub platform: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty", deserialize_with = "deserialize_indexmap_or_empty_array")]
+    pub platform: IndexMap<String, String>,
 
     /// Platform dev requirements
-    #[serde(default, skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_map_or_empty_array")]
-    pub platform_dev: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty", deserialize_with = "deserialize_indexmap_or_empty_array")]
+    pub platform_dev: IndexMap<String, String>,
 
     /// Platform overrides from config
-    #[serde(default, skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_map_or_empty_array")]
-    pub platform_overrides: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty", deserialize_with = "deserialize_indexmap_or_empty_array")]
+    pub platform_overrides: IndexMap<String, String>,
 
     /// Plugin API version used to generate this lock file
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -178,9 +178,9 @@ impl Default for ComposerLock {
             stability_flags: HashMap::new(),
             prefer_stable: false,
             prefer_lowest: false,
-            platform: HashMap::new(),
-            platform_dev: HashMap::new(),
-            platform_overrides: HashMap::new(),
+            platform: IndexMap::new(),
+            platform_dev: IndexMap::new(),
+            platform_overrides: IndexMap::new(),
             plugin_api_version: String::new(),
         }
     }
@@ -362,12 +362,12 @@ where
 #[serde(rename_all = "kebab-case")]
 pub struct LockAutoload {
     /// PSR-4 autoloading
-    #[serde(default, rename = "psr-4", skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_map_or_empty_array")]
-    pub psr4: HashMap<String, serde_json::Value>,
+    #[serde(default, rename = "psr-4", skip_serializing_if = "IndexMap::is_empty", deserialize_with = "deserialize_indexmap_or_empty_array")]
+    pub psr4: IndexMap<String, serde_json::Value>,
 
     /// PSR-0 autoloading
-    #[serde(default, rename = "psr-0", skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_map_or_empty_array")]
-    pub psr0: HashMap<String, serde_json::Value>,
+    #[serde(default, rename = "psr-0", skip_serializing_if = "IndexMap::is_empty", deserialize_with = "deserialize_indexmap_or_empty_array")]
+    pub psr0: IndexMap<String, serde_json::Value>,
 
     /// Classmap files/directories
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
