@@ -491,6 +491,10 @@ impl Installer {
             println!("{} Nothing to update.", style("Info:").cyan());
         }
 
+        if !dry_run {
+            self.audit_abandoned_packages(&packages);
+        }
+
         // Dispatch post-update event
         if !dry_run {
             let exit_code = self.composer.dispatch(&PostUpdateEvent::new(!no_dev))?;
@@ -605,6 +609,10 @@ impl Installer {
 
         println!("{} {} packages installed", style("Success:").green().bold(), result.installed.len());
 
+        if !dry_run {
+            self.audit_abandoned_packages(&packages);
+        }
+
         // Dispatch post-install event
         if !no_scripts && !dry_run {
              let exit_code = self.composer.dispatch(&PostInstallEvent::new(!no_dev))?;
@@ -710,6 +718,35 @@ impl Installer {
         }
 
         packages
+    }
+
+    fn audit_abandoned_packages(&self, packages: &[Package]) {
+        let mut abandoned_packages: Vec<_> = packages
+            .iter()
+            .filter(|p| p.is_abandoned() && !p.is_platform_package())
+            .collect();
+
+        if abandoned_packages.is_empty() {
+            return;
+        }
+
+        abandoned_packages.sort_by(|a, b| a.name.cmp(&b.name));
+
+        eprintln!();
+        for pkg in abandoned_packages {
+            if let Some(ref abandoned) = pkg.abandoned {
+                let replacement = match abandoned.replacement() {
+                    Some(repl) => format!("Use {} instead", repl),
+                    None => "No replacement was suggested".to_string(),
+                };
+                eprintln!(
+                    "{} Package {} is abandoned, you should avoid using it. {}.",
+                    style("Warning:").yellow(),
+                    pkg.name,
+                    replacement
+                );
+            }
+        }
     }
 }
 

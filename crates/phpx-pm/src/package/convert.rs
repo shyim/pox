@@ -38,6 +38,12 @@ impl From<&LockedPackage> for Package {
             pkg.support = Some(Support::from(&lp.support));
         }
 
+        pkg.abandoned = match &lp.abandoned {
+            serde_json::Value::Bool(true) => Some(super::Abandoned::Yes),
+            serde_json::Value::String(s) if !s.is_empty() => Some(super::Abandoned::Replacement(s.clone())),
+            _ => None,
+        };
+
         if let Some(ref src) = lp.source {
             pkg.source = Some(Source::new(&src.source_type, &src.url, &src.reference));
         }
@@ -79,6 +85,12 @@ impl From<LockedPackage> for Package {
 
 impl From<&Package> for LockedPackage {
     fn from(pkg: &Package) -> Self {
+        let abandoned = match &pkg.abandoned {
+            Some(super::Abandoned::Yes) => serde_json::Value::Bool(true),
+            Some(super::Abandoned::Replacement(s)) => serde_json::Value::String(s.clone()),
+            None => serde_json::Value::Bool(false),
+        };
+
         LockedPackage {
             name: pkg.name.clone(),
             version: pkg.pretty_version().to_string(),
@@ -106,6 +118,7 @@ impl From<&Package> for LockedPackage {
             authors: pkg.authors.iter().map(LockAuthor::from).collect(),
             support: pkg.support.as_ref().map(support_to_hashmap).unwrap_or_default(),
             funding: pkg.funding.iter().map(LockFunding::from).collect(),
+            abandoned,
             ..Default::default()
         }
     }
@@ -462,5 +475,98 @@ mod tests {
         assert_eq!(converted.authors.len(), original.authors.len());
         assert!(converted.support.is_some());
         assert_eq!(converted.funding.len(), original.funding.len());
+    }
+
+    #[test]
+    fn test_abandoned_bool_true_to_package() {
+        let locked = LockedPackage {
+            name: "vendor/abandoned".to_string(),
+            version: "1.0.0".to_string(),
+            package_type: "library".to_string(),
+            abandoned: serde_json::Value::Bool(true),
+            ..Default::default()
+        };
+
+        let pkg = Package::from(&locked);
+        assert!(pkg.is_abandoned());
+        assert_eq!(pkg.abandoned, Some(super::super::Abandoned::Yes));
+    }
+
+    #[test]
+    fn test_abandoned_string_to_package() {
+        let locked = LockedPackage {
+            name: "vendor/abandoned".to_string(),
+            version: "1.0.0".to_string(),
+            package_type: "library".to_string(),
+            abandoned: serde_json::Value::String("vendor/replacement".to_string()),
+            ..Default::default()
+        };
+
+        let pkg = Package::from(&locked);
+        assert!(pkg.is_abandoned());
+        assert_eq!(pkg.abandoned, Some(super::super::Abandoned::Replacement("vendor/replacement".to_string())));
+    }
+
+    #[test]
+    fn test_abandoned_false_to_package() {
+        let locked = LockedPackage {
+            name: "vendor/normal".to_string(),
+            version: "1.0.0".to_string(),
+            package_type: "library".to_string(),
+            abandoned: serde_json::Value::Bool(false),
+            ..Default::default()
+        };
+
+        let pkg = Package::from(&locked);
+        assert!(!pkg.is_abandoned());
+        assert_eq!(pkg.abandoned, None);
+    }
+
+    #[test]
+    fn test_package_abandoned_yes_to_locked() {
+        let mut pkg = Package::new("vendor/abandoned", "1.0.0");
+        pkg.abandoned = Some(super::super::Abandoned::Yes);
+
+        let locked = LockedPackage::from(&pkg);
+        assert_eq!(locked.abandoned, serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn test_package_abandoned_replacement_to_locked() {
+        let mut pkg = Package::new("vendor/abandoned", "1.0.0");
+        pkg.abandoned = Some(super::super::Abandoned::Replacement("vendor/new".to_string()));
+
+        let locked = LockedPackage::from(&pkg);
+        assert_eq!(locked.abandoned, serde_json::Value::String("vendor/new".to_string()));
+    }
+
+    #[test]
+    fn test_package_not_abandoned_to_locked() {
+        let pkg = Package::new("vendor/normal", "1.0.0");
+
+        let locked = LockedPackage::from(&pkg);
+        assert_eq!(locked.abandoned, serde_json::Value::Bool(false));
+    }
+
+    #[test]
+    fn test_abandoned_roundtrip_with_replacement() {
+        let mut original = Package::new("vendor/old", "1.0.0");
+        original.abandoned = Some(super::super::Abandoned::Replacement("vendor/new".to_string()));
+
+        let locked = LockedPackage::from(&original);
+        let converted = Package::from(&locked);
+
+        assert_eq!(converted.abandoned, original.abandoned);
+    }
+
+    #[test]
+    fn test_abandoned_roundtrip_without_replacement() {
+        let mut original = Package::new("vendor/old", "1.0.0");
+        original.abandoned = Some(super::super::Abandoned::Yes);
+
+        let locked = LockedPackage::from(&original);
+        let converted = Package::from(&locked);
+
+        assert_eq!(converted.abandoned, original.abandoned);
     }
 }

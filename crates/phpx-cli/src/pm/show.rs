@@ -282,6 +282,14 @@ fn print_package_info(package: &phpx_pm::Package) -> Result<()> {
     println!("versions : {}", package.pretty_version.as_deref().unwrap_or(&package.version));
     println!("type     : {}", package.package_type);
 
+    if let Some(abandoned) = &package.abandoned {
+        let replacement = match abandoned.replacement() {
+            Some(pkg) => format!("Use {} instead", pkg),
+            None => "No replacement was suggested".to_string(),
+        };
+        eprintln!("\nPackage {} is abandoned, you should avoid using it. {}.", package.name, replacement);
+    }
+
     if !package.require.is_empty() {
         println!("\nrequires");
         for (name, constraint) in &package.require {
@@ -321,11 +329,19 @@ fn print_package_info(package: &phpx_pm::Package) -> Result<()> {
 }
 
 fn print_package_json(package: &phpx_pm::Package) -> Result<()> {
+    let abandoned_value = package.abandoned.as_ref().map(|a| {
+        match a.replacement() {
+            Some(pkg) => serde_json::json!(pkg),
+            None => serde_json::json!(true),
+        }
+    });
+
     let json = serde_json::json!({
         "name": package.name,
         "version": package.pretty_version.as_deref().unwrap_or(&package.version),
         "description": package.description,
         "type": package.package_type,
+        "abandoned": abandoned_value,
         "require": package.require,
         "require-dev": package.require_dev,
         "provide": package.provide,
@@ -372,10 +388,18 @@ fn list_packages_filtered(
         let json: Vec<_> = filtered
             .iter()
             .map(|p| {
+                let abandoned_value = p.abandoned.as_ref().map(|a| {
+                    match a.replacement() {
+                        Some(pkg) => serde_json::json!(pkg),
+                        None => serde_json::json!(true),
+                    }
+                });
+
                 serde_json::json!({
                     "name": p.name,
                     "version": p.pretty_version.as_deref().unwrap_or(&p.version),
                     "description": p.description,
+                    "abandoned": abandoned_value,
                 })
             })
             .collect();
@@ -393,7 +417,8 @@ fn list_packages_filtered(
                     .lines()
                     .next()
                     .unwrap_or("");
-                println!("{:<40} {:<15} {}", package.name, version, desc);
+                let abandoned_marker = if package.abandoned.is_some() { " [abandoned]" } else { "" };
+                println!("{:<40} {:<15} {}{}", package.name, version, desc, abandoned_marker);
             }
         }
     }
