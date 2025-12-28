@@ -224,7 +224,10 @@ impl PoolBuilder {
     /// Load all packages marked for loading from repositories using batch loading.
     async fn load_packages_marked_for_loading(&mut self, repositories: &[Arc<dyn Repository>]) {
         // Move packages_to_load to loaded_packages
-        let packages_to_load: Vec<_> = self.packages_to_load.drain().collect();
+        let mut packages_to_load: Vec<_> = self.packages_to_load.drain().collect();
+
+        // Sort to ensure deterministic ordering
+        packages_to_load.sort_by(|a, b| a.0.cmp(&b.0));
 
         for (name, constraint) in &packages_to_load {
             self.loaded_packages.insert(name.clone(), constraint.clone());
@@ -293,8 +296,11 @@ impl PoolBuilder {
             }
         }
 
-        // Mark dependencies for loading
-        for (dep_name, constraint_str) in &package.require {
+        // Mark dependencies for loading - sort for deterministic order
+        let mut sorted_requires: Vec<_> = package.require.iter().collect();
+        sorted_requires.sort_by(|a, b| a.0.cmp(b.0));
+
+        for (dep_name, constraint_str) in sorted_requires {
             let dep_name_lower = dep_name.to_lowercase();
 
             // Skip platform packages

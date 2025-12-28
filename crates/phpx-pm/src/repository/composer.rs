@@ -65,6 +65,8 @@ pub struct ComposerRepository {
     cache_ttl: Duration,
     /// Authentication configuration
     auth: Option<Arc<AuthConfig>>,
+    /// Per-package loading locks to prevent concurrent loads of the same package
+    loading_locks: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl ComposerRepository {
@@ -74,6 +76,7 @@ impl ComposerRepository {
             name: name.into(),
             url: url.into(),
             packages: RwLock::new(HashMap::new()),
+            loading_locks: RwLock::new(HashMap::new()),
             client: reqwest::Client::builder()
                 .user_agent("phpx-composer/0.1.0")
                 .build()
@@ -157,6 +160,26 @@ impl ComposerRepository {
             let packages = self.packages.read().await;
             if let Some(pkgs) = packages.get(name) {
                 log::trace!("Cache hit (memory): {}", name);
+                return Ok(pkgs.clone());
+            }
+        }
+
+        // Get or create a per-package lock to prevent concurrent loads
+        let lock = {
+            let mut locks = self.loading_locks.write().await;
+            locks.entry(name.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+                .clone()
+        };
+
+        // Acquire the lock for this package
+        let _guard = lock.lock().await;
+
+        // Check cache again after acquiring lock (another task may have loaded it)
+        {
+            let packages = self.packages.read().await;
+            if let Some(pkgs) = packages.get(name) {
+                log::trace!("Cache hit (memory, after lock): {}", name);
                 return Ok(pkgs.clone());
             }
         }
@@ -273,9 +296,15 @@ impl ComposerRepository {
             .map_err(|e| format!("Failed to fetch package metadata: {}", e))?;
 
         if !response.status().is_success() {
-            log::debug!("HTTP {} {} in {:?}", response.status().as_u16(), url, start.elapsed());
-            // Package not found or other error
-            return Ok((String::new(), CacheMetadata::default()));
+            let status = response.status();
+            log::debug!("HTTP {} {} in {:?}", status.as_u16(), url, start.elapsed());
+            // 404 is expected for non-existent packages, but other errors should be logged
+            if status.as_u16() == 404 {
+                return Ok((String::new(), CacheMetadata::default()));
+            } else {
+                // 429, 5xx, etc. - these are transient errors, return error so caller can retry
+                return Err(format!("HTTP {} for {}", status.as_u16(), url));
+            }
         }
 
         // Extract Last-Modified header
@@ -664,7 +693,13 @@ impl Repository for ComposerRepository {
             .map(|(name, constraint)| {
                 let name_clone = name.clone();
                 async move {
-                    let pkgs = self.load_package_metadata(&name_clone).await.unwrap_or_default();
+                    let pkgs = match self.load_package_metadata(&name_clone).await {
+                        Ok(p) => p,
+                        Err(e) => {
+                            log::warn!("Failed to load package {}: {}", name_clone, e);
+                            Vec::new()
+                        }
+                    };
                     (name, constraint, pkgs)
                 }
             })

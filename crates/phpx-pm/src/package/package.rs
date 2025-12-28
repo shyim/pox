@@ -566,17 +566,21 @@ impl Package {
     pub fn get_names(&self, include_provides: bool) -> Vec<String> {
         let mut names = vec![self.name.to_lowercase()];
 
-        // Replaces are always included (stronger relationship)
-        for (replaced_name, _) in &self.replace {
+        // Replaces are always included (stronger relationship) - sort for deterministic order
+        let mut replace_keys: Vec<_> = self.replace.keys().collect();
+        replace_keys.sort();
+        for replaced_name in replace_keys {
             let name = replaced_name.to_lowercase();
             if !names.contains(&name) {
                 names.push(name);
             }
         }
 
-        // Provides are only included when requested
+        // Provides are only included when requested - sort for deterministic order
         if include_provides {
-            for (provided_name, _) in &self.provide {
+            let mut provide_keys: Vec<_> = self.provide.keys().collect();
+            provide_keys.sort();
+            for provided_name in provide_keys {
                 let name = provided_name.to_lowercase();
                 if !names.contains(&name) {
                     names.push(name);

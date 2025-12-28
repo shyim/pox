@@ -211,7 +211,11 @@ impl<'a> RuleGenerator<'a> {
                 }
 
                 // Process alias dependencies (may differ from base due to self.version replacement)
-                for (dep_name, constraint) in alias.require() {
+                // Sort for deterministic order
+                let mut sorted_alias_requires: Vec<_> = alias.require().iter().collect();
+                sorted_alias_requires.sort_by(|a, b| a.0.cmp(b.0));
+
+                for (dep_name, constraint) in sorted_alias_requires {
                     if dep_name.starts_with("lib-") {
                         continue;
                     }
@@ -270,8 +274,11 @@ impl<'a> RuleGenerator<'a> {
                 .push(package_id);
         }
 
-        // Add requirement rules
-        for (dep_name, constraint) in &package.require {
+        // Add requirement rules - sort dependencies for deterministic order
+        let mut sorted_requires: Vec<_> = package.require.iter().collect();
+        sorted_requires.sort_by(|a, b| a.0.cmp(b.0));
+
+        for (dep_name, constraint) in sorted_requires {
             // Skip lib-* packages (library constraints like lib-libxml)
             // These are rarely used and hard to detect
             if dep_name.starts_with("lib-") {
@@ -337,7 +344,11 @@ impl<'a> RuleGenerator<'a> {
     /// actually added during rule generation, not all packages in the pool.
     /// This matches Composer's behavior in RuleSetGenerator.php lines 242-246.
     fn add_same_name_conflict_rules(&mut self) {
-        for (name, package_ids) in &self.added_packages_by_name {
+        // Sort by name for deterministic rule order
+        let mut sorted_names: Vec<_> = self.added_packages_by_name.keys().cloned().collect();
+        sorted_names.sort();
+        for name in sorted_names {
+            let package_ids = self.added_packages_by_name.get(&name).unwrap();
             if package_ids.len() <= 1 {
                 continue;
             }
@@ -379,14 +390,21 @@ impl<'a> RuleGenerator<'a> {
         let mut conflict_count = 0usize;
         let mut skipped_not_added = 0usize;
 
-        for &package_id in &self.added_packages {
+        // Sort package IDs for deterministic rule generation order
+        let mut sorted_packages: Vec<_> = self.added_packages.iter().copied().collect();
+        sorted_packages.sort();
+
+        for package_id in sorted_packages {
             let Some(package) = self.pool.package(package_id) else {
                 continue;
             };
             let package = package.clone();
 
-            // Process explicit conflicts from package's "conflict" field
-            for (conflict_name, constraint) in &package.conflict {
+            // Process explicit conflicts from package's "conflict" field - sort for deterministic order
+            let mut sorted_conflicts: Vec<_> = package.conflict.iter().collect();
+            sorted_conflicts.sort_by(|a, b| a.0.cmp(b.0));
+
+            for (conflict_name, constraint) in sorted_conflicts {
                 let conflict_name_lower = conflict_name.to_lowercase();
 
                 // Skip if the conflict target is not in our processed packages
@@ -445,13 +463,20 @@ impl<'a> RuleGenerator<'a> {
         let mut replacers_by_name: std::collections::HashMap<String, Vec<PackageId>> =
             std::collections::HashMap::new();
 
-        for &package_id in &self.added_packages {
+        // Sort package IDs for deterministic iteration order
+        let mut sorted_packages: Vec<_> = self.added_packages.iter().copied().collect();
+        sorted_packages.sort();
+
+        for package_id in sorted_packages {
             let Some(package) = self.pool.package(package_id) else {
                 continue;
             };
 
-            // Only track replaces, not provides
-            for (replaced_name, _) in &package.replace {
+            // Only track replaces, not provides - sort for deterministic order
+            let mut sorted_replaces: Vec<_> = package.replace.iter().collect();
+            sorted_replaces.sort_by(|a, b| a.0.cmp(b.0));
+
+            for (replaced_name, _) in sorted_replaces {
                 let name = replaced_name.to_lowercase();
                 replacers_by_name
                     .entry(name)
@@ -461,7 +486,10 @@ impl<'a> RuleGenerator<'a> {
         }
 
         // Add multi-conflict rules for packages that replace the same name
-        for (name, replacer_ids) in replacers_by_name {
+        // Sort by name for deterministic rule order
+        let mut sorted_replacers: Vec<_> = replacers_by_name.into_iter().collect();
+        sorted_replacers.sort_by(|a, b| a.0.cmp(&b.0));
+        for (name, replacer_ids) in sorted_replacers {
             if replacer_ids.len() <= 1 {
                 continue;
             }

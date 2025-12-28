@@ -4,7 +4,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
-use tokio::task::JoinSet;
 
 use crate::composer::Composer;
 use crate::event::{
@@ -116,14 +115,18 @@ impl Installer {
             );
         }
 
-        // Add stability flags
-        for (name, constraint) in &composer_json.require {
+        // Add stability flags - sort for deterministic order
+        let mut sorted_require: Vec<_> = composer_json.require.iter().collect();
+        sorted_require.sort_by(|a, b| a.0.cmp(b.0));
+        for (name, constraint) in sorted_require {
             if let Some(stability) = extract_stability_flag(constraint) {
                 pool.add_stability_flag(name, stability);
                 log::trace!("Stability flag for {}: {:?}", name, stability);
             }
         }
-        for (name, constraint) in &composer_json.require_dev {
+        let mut sorted_require_dev: Vec<_> = composer_json.require_dev.iter().collect();
+        sorted_require_dev.sort_by(|a, b| a.0.cmp(b.0));
+        for (name, constraint) in sorted_require_dev {
             if let Some(stability) = extract_stability_flag(constraint) {
                 pool.add_stability_flag(name, stability);
                 log::trace!("Stability flag for {}: {:?}", name, stability);
@@ -150,15 +153,19 @@ impl Installer {
         // Collect all packages first, then sort and add to pool for deterministic order
         let mut all_packages: Vec<Arc<Package>> = Vec::new();
 
-        // Add root requirements with their constraints
-        for (name, constraint) in &composer_json.require {
+        // Add root requirements with their constraints - sort for deterministic order
+        let mut sorted_require: Vec<_> = composer_json.require.iter().collect();
+        sorted_require.sort_by(|a, b| a.0.cmp(b.0));
+        for (name, constraint) in sorted_require {
             if !is_platform_package(name) && !root_replaced.contains(&name.to_lowercase()) {
                 let name_lower = name.to_lowercase();
                 pending_packages.insert(name_lower, constraint.clone());
             }
         }
         if !no_dev {
-            for (name, constraint) in &composer_json.require_dev {
+            let mut sorted_require_dev: Vec<_> = composer_json.require_dev.iter().collect();
+            sorted_require_dev.sort_by(|a, b| a.0.cmp(b.0));
+            for (name, constraint) in sorted_require_dev {
                 if !is_platform_package(name) && !root_replaced.contains(&name.to_lowercase()) {
                     let name_lower = name.to_lowercase();
                     // Merge constraints if already present
@@ -171,80 +178,87 @@ impl Installer {
             }
         }
 
-        let mut tasks = JoinSet::new();
-        const MAX_CONCURRENT_REQUESTS: usize = 50;
-
+        // Process packages in parallel batches for performance
+        // Determinism is ensured by:
+        // 1. Processing batches in sorted order
+        // 2. Sorting packages before adding to pool
+        // 3. Sorting HashMap iterations in rule generation
         loop {
-            // Get pending packages sorted for deterministic processing
+            // Get pending packages sorted for deterministic batch processing
             let mut pending_list: Vec<(String, String)> = pending_packages.drain().collect();
-            pending_list.sort_by(|a, b| a.0.cmp(&b.0));
-
-            while tasks.len() < MAX_CONCURRENT_REQUESTS {
-                if let Some((name, constraint)) = pending_list.pop() {
-                    if loaded_packages.contains(&name) {
-                        continue;
-                    }
-                    loaded_packages.insert(name.clone());
-
-                    let rm = repo_manager.clone();
-                    let name_clone = name.clone();
-                    let constraint_clone = constraint.clone();
-
-                    spinner.set_message(format!("Loading {}...", name));
-                    http_request_count += 1;
-
-                    tasks.spawn(async move {
-                        let start = std::time::Instant::now();
-                        // Use constraint-based loading when available
-                        let result = rm.find_packages_with_constraint(&name_clone, &constraint_clone).await;
-                        (name_clone.clone(), constraint_clone, result, start.elapsed())
-                    });
-                } else {
-                    break;
-                }
-            }
-
-            // Put remaining items back
-            for (name, constraint) in pending_list {
-                pending_packages.insert(name, constraint);
-            }
-
-            if tasks.is_empty() && pending_packages.is_empty() {
+            if pending_list.is_empty() {
                 break;
             }
+            pending_list.sort_by(|a, b| a.0.cmp(&b.0));
 
-            if let Some(res) = tasks.join_next().await {
-                match res {
-                    Ok((name, _constraint, packages, elapsed)) => {
-                        log::trace!("HTTP: {} ({} versions) in {:?}", name, packages.len(), elapsed);
-                        for pkg in &packages {
-                            // Add dependencies with their constraints
-                            for (dep_name, dep_constraint) in &pkg.require {
-                                if !is_platform_package(dep_name) {
-                                    let dep_lower = dep_name.to_lowercase();
-                                    if !loaded_packages.contains(&dep_lower) {
-                                        // Merge constraint if already pending
-                                        if let Some(existing) = pending_packages.get(&dep_lower) {
-                                            // Only extend if the new constraint isn't a subset
-                                            // For simplicity, just merge with OR
-                                            pending_packages.insert(
-                                                dep_lower,
-                                                format!("{} || {}", existing, dep_constraint),
-                                            );
-                                        } else {
-                                            log::trace!("Adding dependency {} {} from {} {}", dep_name, dep_constraint, pkg.name, pkg.version);
-                                            pending_packages.insert(dep_lower, dep_constraint.clone());
-                                        }
-                                    }
+            // Filter out already loaded packages
+            let to_load: Vec<(String, String)> = pending_list
+                .into_iter()
+                .filter(|(name, _)| !loaded_packages.contains(name))
+                .collect();
+
+            if to_load.is_empty() {
+                continue;
+            }
+
+            // Mark all as loaded before parallel fetch to avoid duplicates
+            for (name, _) in &to_load {
+                loaded_packages.insert(name.clone());
+            }
+
+            spinner.set_message(format!("Loading {} packages...", to_load.len()));
+            http_request_count += to_load.len();
+
+            // Load packages in parallel
+            let mut tasks = tokio::task::JoinSet::new();
+            for (name, constraint) in to_load {
+                let repo_manager = repo_manager.clone();
+                tasks.spawn(async move {
+                    let packages = repo_manager.find_packages_with_constraint(&name, &constraint).await;
+                    (name, packages)
+                });
+            }
+
+            // Collect results and process dependencies
+            let mut batch_packages: Vec<Arc<Package>> = Vec::new();
+            let mut new_deps: Vec<(String, String)> = Vec::new();
+
+            while let Some(result) = tasks.join_next().await {
+                if let Ok((name, packages)) = result {
+                    log::trace!("HTTP: {} ({} versions)", name, packages.len());
+                    for pkg in packages {
+                        // Collect dependencies
+                        for (dep_name, dep_constraint) in &pkg.require {
+                            if !is_platform_package(dep_name) {
+                                let dep_lower = dep_name.to_lowercase();
+                                if !loaded_packages.contains(&dep_lower) {
+                                    log::trace!("Adding dependency {} {} from {} {}", dep_name, dep_constraint, pkg.name, pkg.version);
+                                    new_deps.push((dep_lower, dep_constraint.clone()));
                                 }
                             }
-                            // Collect packages instead of adding directly to pool
-                            all_packages.push(pkg.clone());
                         }
+                        batch_packages.push(pkg);
                     }
-                    Err(e) => eprintln!("Warning: Task failed: {}", e),
                 }
             }
+
+            // Merge new dependencies into pending (after parallel fetch completes)
+            // Sort first for deterministic merging
+            new_deps.sort_by(|a, b| a.0.cmp(&b.0));
+            for (dep_name, dep_constraint) in new_deps {
+                if !loaded_packages.contains(&dep_name) {
+                    if let Some(existing) = pending_packages.get(&dep_name) {
+                        pending_packages.insert(
+                            dep_name,
+                            format!("{} || {}", existing, dep_constraint),
+                        );
+                    } else {
+                        pending_packages.insert(dep_name, dep_constraint);
+                    }
+                }
+            }
+
+            all_packages.extend(batch_packages);
         }
 
         // Sort packages by name and version for deterministic pool order
@@ -264,15 +278,19 @@ impl Installer {
             pool.len(), http_request_count, load_start.elapsed());
         log::debug!("Pool has {} packages after loading", pool.len());
 
-        // Solver Request
+        // Solver Request - sort for deterministic order
         let mut request = Request::new();
-        for (name, constraint) in &composer_json.require {
+        let mut sorted_require: Vec<_> = composer_json.require.iter().collect();
+        sorted_require.sort_by(|a, b| a.0.cmp(b.0));
+        for (name, constraint) in sorted_require {
             if !is_platform_package(name) {
                 request.require(name, constraint);
             }
         }
         if !no_dev {
-            for (name, constraint) in &composer_json.require_dev {
+            let mut sorted_require_dev: Vec<_> = composer_json.require_dev.iter().collect();
+            sorted_require_dev.sort_by(|a, b| a.0.cmp(b.0));
+            for (name, constraint) in sorted_require_dev {
                 if !is_platform_package(name) {
                     request.require(name, constraint);
                 }
@@ -288,7 +306,7 @@ impl Installer {
         }
 
         let policy = Policy::new().prefer_lowest(prefer_lowest);
-        let solver = Solver::new(&pool, &policy);
+        let solver = Solver::new(&pool, &policy).with_optimization(true);
 
         let transaction = match solver.solve(&request) {
             Ok(tx) => tx,
