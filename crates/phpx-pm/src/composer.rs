@@ -315,7 +315,7 @@ fn is_packagist_disabled(repositories: &Repositories) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use indexmap::IndexMap;
 
     fn create_minimal_composer_json() -> ComposerJson {
         ComposerJson {
@@ -492,13 +492,13 @@ mod tests {
 
     #[test]
     fn test_is_packagist_disabled_empty_object() {
-        let repos = Repositories::Object(HashMap::new());
+        let repos = Repositories::Object(IndexMap::new());
         assert!(!is_packagist_disabled(&repos));
     }
 
     #[test]
     fn test_is_packagist_disabled_object_packagist_org_false() {
-        let mut map = HashMap::new();
+        let mut map = IndexMap::new();
         map.insert("packagist.org".to_string(), JsonRepository::Disabled(false));
         let repos = Repositories::Object(map);
         assert!(is_packagist_disabled(&repos));
@@ -506,7 +506,7 @@ mod tests {
 
     #[test]
     fn test_is_packagist_disabled_object_packagist_false() {
-        let mut map = HashMap::new();
+        let mut map = IndexMap::new();
         map.insert("packagist".to_string(), JsonRepository::Disabled(false));
         let repos = Repositories::Object(map);
         assert!(is_packagist_disabled(&repos));
@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn test_is_packagist_disabled_object_other_repo() {
-        let mut map = HashMap::new();
+        let mut map = IndexMap::new();
         map.insert("other-repo".to_string(), JsonRepository::Disabled(false));
         let repos = Repositories::Object(map);
         assert!(!is_packagist_disabled(&repos));

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use indexmap::IndexMap;
 use std::time::Duration;
 use async_trait::async_trait;
 use tokio::sync::RwLock;
@@ -42,7 +43,7 @@ where
 }
 
 /// Deserialize a HashMap that might be "__unset"
-fn deserialize_hashmap_maybe_unset<'de, D>(deserializer: D) -> Result<Option<HashMap<String, String>>, D::Error>
+fn deserialize_hashmap_maybe_unset<'de, D>(deserializer: D) -> Result<Option<IndexMap<String, String>>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -67,6 +68,8 @@ pub struct ComposerRepository {
     auth: Option<Arc<AuthConfig>>,
     /// Per-package loading locks to prevent concurrent loads of the same package
     loading_locks: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Notification URL from repository metadata
+    notify_batch: RwLock<Option<String>>,
 }
 
 impl ComposerRepository {
@@ -84,6 +87,7 @@ impl ComposerRepository {
             file_cache: None,
             cache_ttl: DEFAULT_CACHE_TTL,
             auth: None,
+            notify_batch: RwLock::new(None),
         }
     }
 
@@ -150,10 +154,72 @@ impl ComposerRepository {
         format!("provider-{}.json", package_name.replace('/', "~"))
     }
 
+    async fn ensure_notify_batch(&self) {
+        if self.notify_batch.read().await.is_some() {
+            return;
+        }
+
+        let packages_url = format!("{}/packages.json", self.url);
+        let cache_key = "root-packages.json".to_string();
+
+        let body = if let Some(ref file_cache) = self.file_cache {
+            if let Ok(Some((cached_content, metadata))) = file_cache.read(&cache_key) {
+                if let Ok(Some(age)) = file_cache.age(&cache_key) {
+                    if age < self.cache_ttl {
+                        String::from_utf8_lossy(&cached_content).to_string()
+                    } else if let Some(ref last_modified) = metadata.last_modified {
+                        match self.fetch_if_modified(&packages_url, last_modified).await {
+                            Ok(FetchResult::NotModified) => {
+                                file_cache.write(&cache_key, &cached_content, &metadata).ok();
+                                String::from_utf8_lossy(&cached_content).to_string()
+                            }
+                            Ok(FetchResult::Modified(body, new_metadata)) => {
+                                file_cache.write(&cache_key, body.as_bytes(), &new_metadata).ok();
+                                body
+                            }
+                            Err(_) => String::from_utf8_lossy(&cached_content).to_string(),
+                        }
+                    } else {
+                        match self.fetch_fresh(&packages_url).await {
+                            Ok((body, new_metadata)) => {
+                                file_cache.write(&cache_key, body.as_bytes(), &new_metadata).ok();
+                                body
+                            }
+                            Err(_) => String::from_utf8_lossy(&cached_content).to_string(),
+                        }
+                    }
+                } else {
+                    String::from_utf8_lossy(&cached_content).to_string()
+                }
+            } else {
+                match self.fetch_fresh(&packages_url).await {
+                    Ok((body, metadata)) => {
+                        file_cache.write(&cache_key, body.as_bytes(), &metadata).ok();
+                        body
+                    }
+                    Err(_) => return,
+                }
+            }
+        } else {
+            match self.fetch_fresh(&packages_url).await {
+                Ok((body, _)) => body,
+                Err(_) => return,
+            }
+        };
+
+        if let Ok(root_meta) = serde_json::from_str::<serde_json::Value>(&body) {
+            if let Some(notify) = root_meta.get("notify-batch").and_then(|v| v.as_str()) {
+                *self.notify_batch.write().await = Some(notify.to_string());
+            }
+        }
+    }
+
     /// Load package metadata from the Packagist v2 API with caching
     async fn load_package_metadata(&self, name: &str) -> Result<Vec<Arc<Package>>, String> {
         let name_lower = name.to_lowercase();
         let name = name_lower.as_str();
+
+        self.ensure_notify_batch().await;
 
         // Check in-memory cache first
         {
@@ -339,6 +405,8 @@ impl ComposerRepository {
         // Convert to Package structs
         let mut result = Vec::new();
 
+        let notify_batch = self.notify_batch.read().await.clone();
+
         if let Some(versions) = data.packages.get(name) {
             // Packagist v2 minified format uses delta compression:
             // - First version has all fields
@@ -349,7 +417,7 @@ impl ComposerRepository {
             // We must expand each version based on the PREVIOUS expanded version, not the first.
             let expanded_versions = Self::expand_minified_versions(versions);
             for expanded_data in &expanded_versions {
-                let pkg = self.convert_to_package(name, expanded_data, None);
+                let pkg = self.convert_to_package(name, expanded_data, notify_batch.as_deref());
                 result.push(Arc::new(pkg));
             }
         }
@@ -424,13 +492,13 @@ impl ComposerRepository {
     }
 
     /// Apply delta for HashMap fields: if current has value, use it; otherwise inherit from prev
-    fn apply_delta_hashmap(current: &Option<HashMap<String, String>>, prev: &Option<HashMap<String, String>>) -> Option<HashMap<String, String>> {
+    fn apply_delta_hashmap(current: &Option<IndexMap<String, String>>, prev: &Option<IndexMap<String, String>>) -> Option<IndexMap<String, String>> {
         current.clone().or_else(|| prev.clone())
     }
 
     /// Convert Packagist version data to a Package.
     /// The data should already be expanded (not minified).
-    fn convert_to_package(&self, package_name: &str, data: &PackagistVersion, _base: Option<&PackagistVersion>) -> Package {
+    fn convert_to_package(&self, package_name: &str, data: &PackagistVersion, notify_batch: Option<&str>) -> Package {
         // Use normalized version if available, otherwise use the pretty version
         let version = data.version_normalized.as_ref()
             .unwrap_or(&data.version);
@@ -496,7 +564,8 @@ impl ComposerRepository {
             pkg.time = chrono::DateTime::parse_from_rfc3339(t).ok().map(|dt| dt.with_timezone(&chrono::Utc));
         }
 
-        pkg.notification_url = data.notification_url.clone();
+        pkg.notification_url = data.notification_url.clone()
+            .or_else(|| notify_batch.map(|s| s.to_string()));
 
         if let Some(s) = &data.support {
             pkg.support = Some(crate::package::Support {
@@ -771,17 +840,17 @@ struct PackagistVersion {
     #[serde(default, deserialize_with = "deserialize_maybe_unset")]
     authors: Option<Vec<PackagistAuthor>>,
     #[serde(default, deserialize_with = "deserialize_hashmap_maybe_unset")]
-    require: Option<HashMap<String, String>>,
+    require: Option<IndexMap<String, String>>,
     #[serde(rename = "require-dev", default, deserialize_with = "deserialize_hashmap_maybe_unset")]
-    require_dev: Option<HashMap<String, String>>,
+    require_dev: Option<IndexMap<String, String>>,
     #[serde(default, deserialize_with = "deserialize_hashmap_maybe_unset")]
-    conflict: Option<HashMap<String, String>>,
+    conflict: Option<IndexMap<String, String>>,
     #[serde(default, deserialize_with = "deserialize_hashmap_maybe_unset")]
-    provide: Option<HashMap<String, String>>,
+    provide: Option<IndexMap<String, String>>,
     #[serde(default, deserialize_with = "deserialize_hashmap_maybe_unset")]
-    replace: Option<HashMap<String, String>>,
+    replace: Option<IndexMap<String, String>>,
     #[serde(default, deserialize_with = "deserialize_hashmap_maybe_unset")]
-    suggest: Option<HashMap<String, String>>,
+    suggest: Option<IndexMap<String, String>>,
     #[serde(rename = "type", default, deserialize_with = "deserialize_maybe_unset")]
     package_type: Option<String>,
     #[serde(default, deserialize_with = "deserialize_maybe_unset")]

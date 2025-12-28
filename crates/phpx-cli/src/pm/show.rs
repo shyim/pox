@@ -468,7 +468,7 @@ fn show_tree_all(packages: &[Arc<phpx_pm::Package>], composer_json: &ComposerJso
 }
 
 fn print_dependencies_tree(
-    requires: &std::collections::HashMap<String, String>,
+    requires: &indexmap::IndexMap<String, String>,
     all_packages: &[Arc<phpx_pm::Package>],
     prefix: &str,
     visited: &mut HashSet<String>,

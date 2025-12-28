@@ -1,4 +1,5 @@
 use super::{Link, LinkType, Package, Stability};
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -38,19 +39,19 @@ pub struct AliasPackage {
     has_self_version_requires: bool,
 
     /// Transformed require dependencies (with self.version replaced)
-    require: HashMap<String, String>,
+    require: IndexMap<String, String>,
 
     /// Transformed dev require dependencies (with self.version replaced)
-    require_dev: HashMap<String, String>,
+    require_dev: IndexMap<String, String>,
 
     /// Transformed conflict dependencies (with self.version replaced)
-    conflict: HashMap<String, String>,
+    conflict: IndexMap<String, String>,
 
     /// Transformed provide dependencies (with self.version replaced)
-    provide: HashMap<String, String>,
+    provide: IndexMap<String, String>,
 
     /// Transformed replace dependencies (with self.version replaced)
-    replace: HashMap<String, String>,
+    replace: IndexMap<String, String>,
 }
 
 impl AliasPackage {
@@ -72,11 +73,11 @@ impl AliasPackage {
             is_dev,
             is_root_package_alias: false,
             has_self_version_requires: false,
-            require: HashMap::new(),
-            require_dev: HashMap::new(),
-            conflict: HashMap::new(),
-            provide: HashMap::new(),
-            replace: HashMap::new(),
+            require: IndexMap::new(),
+            require_dev: IndexMap::new(),
+            conflict: IndexMap::new(),
+            provide: IndexMap::new(),
+            replace: IndexMap::new(),
         };
 
         // Transform dependencies by replacing self.version constraints
@@ -140,13 +141,13 @@ impl AliasPackage {
     /// For conflict/provide/replace (is_link_type = true), we add new entries
     /// rather than replacing, so both versions are included.
     fn replace_self_version_deps(
-        deps: &HashMap<String, String>,
+        deps: &IndexMap<String, String>,
         version: &str,
         _pretty_version: &str,
         add_alias_entries: bool,
         has_self_version: &mut bool,
-    ) -> HashMap<String, String> {
-        let mut result = HashMap::new();
+    ) -> IndexMap<String, String> {
+        let mut result = IndexMap::new();
 
         for (target, constraint) in deps {
             if constraint == "self.version" {
@@ -249,27 +250,27 @@ impl AliasPackage {
     }
 
     /// Returns the require dependencies (with self.version replaced)
-    pub fn require(&self) -> &HashMap<String, String> {
+    pub fn require(&self) -> &IndexMap<String, String> {
         &self.require
     }
 
     /// Returns the dev require dependencies (with self.version replaced)
-    pub fn require_dev(&self) -> &HashMap<String, String> {
+    pub fn require_dev(&self) -> &IndexMap<String, String> {
         &self.require_dev
     }
 
     /// Returns the conflict dependencies (with self.version replaced)
-    pub fn conflict(&self) -> &HashMap<String, String> {
+    pub fn conflict(&self) -> &IndexMap<String, String> {
         &self.conflict
     }
 
     /// Returns the provide dependencies (with self.version replaced)
-    pub fn provide(&self) -> &HashMap<String, String> {
+    pub fn provide(&self) -> &IndexMap<String, String> {
         &self.provide
     }
 
     /// Returns the replace dependencies (with self.version replaced)
-    pub fn replace(&self) -> &HashMap<String, String> {
+    pub fn replace(&self) -> &IndexMap<String, String> {
         &self.replace
     }
 

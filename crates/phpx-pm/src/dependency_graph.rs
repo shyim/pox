@@ -220,7 +220,7 @@ fn constraint_matches_version(constraint_str: &str, version: &str) -> bool {
 }
 
 fn hashmap_to_links(
-    map: &std::collections::HashMap<String, String>,
+    map: &indexmap::IndexMap<String, String>,
     source: &str,
     link_type: LinkType,
 ) -> Vec<Link> {

@@ -1247,6 +1247,8 @@ checksum = "0ad4bb2b565bca0645f4d68c5c9af97fba094e9791da685bf83cb5f3ce74acf2"
 dependencies = [
  "equivalent",
  "hashbrown",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -1757,6 +1759,7 @@ dependencies = [
  "dialoguer",
  "env_logger",
  "globset",
+ "indexmap",
  "indicatif",
  "log",
  "notify",
@@ -2234,6 +2237,7 @@ version = "1.0.147"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6af14725505314343e673e9ecb7cd7e8a36aa9791eb936235a3567cc31447ae4"
 dependencies = [
+ "indexmap",
  "itoa",
  "memchr",
  "serde",

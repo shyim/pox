@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use indexmap::IndexMap;
 
 use md5::{Md5, Digest};
 use regex::Regex;
@@ -107,9 +108,9 @@ pub struct PackageAutoload {
     /// Version aliases
     pub aliases: Vec<String>,
     /// Packages that this package replaces (name -> version constraint)
-    pub replaces: HashMap<String, String>,
+    pub replaces: IndexMap<String, String>,
     /// Packages that this package provides (name -> version constraint)
-    pub provides: HashMap<String, String>,
+    pub provides: IndexMap<String, String>,
 }
 
 impl PackageAutoload {
@@ -132,8 +133,8 @@ impl Default for PackageAutoload {
             package_type: "library".to_string(),
             dev_requirement: false,
             aliases: Vec::new(),
-            replaces: HashMap::new(),
-            provides: HashMap::new(),
+            replaces: IndexMap::new(),
+            provides: IndexMap::new(),
         }
     }
 }
@@ -1220,8 +1221,8 @@ mod tests {
                 reference: Some("abc123".to_string()),
                 package_type: "library".to_string(),
                 dev_requirement: false,
-                replaces: HashMap::new(),
-                provides: HashMap::new(),
+                replaces: IndexMap::new(),
+                provides: IndexMap::new(),
                 ..Default::default()
             },
             PackageAutoload {
@@ -1232,8 +1233,8 @@ mod tests {
                 reference: Some("def456".to_string()),
                 package_type: "library".to_string(),
                 dev_requirement: true,
-                replaces: HashMap::new(),
-                provides: HashMap::new(),
+                replaces: IndexMap::new(),
+                provides: IndexMap::new(),
                 ..Default::default()
             },
         ];
@@ -1277,10 +1278,10 @@ mod tests {
             ..Default::default()
         };
 
-        let mut replaces = HashMap::new();
+        let mut replaces = IndexMap::new();
         replaces.insert("old/package".to_string(), "1.0.0".to_string());
 
-        let mut provides = HashMap::new();
+        let mut provides = IndexMap::new();
         provides.insert("psr/log-implementation".to_string(), "1.0.0".to_string());
 
         let packages = vec![

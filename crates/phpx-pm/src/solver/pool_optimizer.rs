@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 use std::sync::Arc;
+use indexmap::IndexMap;
 
 use phpx_semver::{Constraint, ConstraintInterface, Operator, VersionParser};
 
@@ -51,7 +52,7 @@ pub struct PoolOptimizer<'a> {
     constraint_cache: HashMap<String, Option<Box<dyn ConstraintInterface>>>,
 
     /// Cache for normalized versions (raw_version -> normalized_version)
-    version_cache: HashMap<String, String>,
+    version_cache: IndexMap<String, String>,
 
     /// Cache for version constraints (normalized_version -> Constraint for matching)
     version_constraint_cache: HashMap<String, Option<Constraint>>,
@@ -69,7 +70,7 @@ impl<'a> PoolOptimizer<'a> {
             aliases_per_package: HashMap::new(),
             version_parser: VersionParser::new(),
             constraint_cache: HashMap::new(),
-            version_cache: HashMap::new(),
+            version_cache: IndexMap::new(),
             version_constraint_cache: HashMap::new(),
         }
     }
@@ -528,7 +529,7 @@ impl<'a> PoolOptimizer<'a> {
         let mut hasher = DefaultHasher::new();
         
         // Helper to hash a map sorted
-        fn hash_deps(hasher: &mut DefaultHasher, deps: &std::collections::HashMap<String, String>, prefix: u8) {
+        fn hash_deps(hasher: &mut DefaultHasher, deps: &IndexMap<String, String>, prefix: u8) {
             if deps.is_empty() { return; }
             prefix.hash(hasher);
             

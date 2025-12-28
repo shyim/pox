@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 /// Root composer.json structure
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -54,28 +54,28 @@ pub struct ComposerJson {
     pub funding: Vec<FundingLink>,
 
     /// Required packages
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub require: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub require: IndexMap<String, String>,
 
     /// Development dependencies
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub require_dev: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub require_dev: IndexMap<String, String>,
 
     /// Conflicting packages
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub conflict: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub conflict: IndexMap<String, String>,
 
     /// Replaced packages
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub replace: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub replace: IndexMap<String, String>,
 
     /// Provided packages (virtual packages)
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub provide: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub provide: IndexMap<String, String>,
 
     /// Suggested packages
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub suggest: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub suggest: IndexMap<String, String>,
 
     /// Autoload configuration
     #[serde(default, skip_serializing_if = "Autoload::is_empty")]
@@ -114,8 +114,8 @@ pub struct ComposerJson {
     pub scripts: Scripts,
 
     /// Script descriptions
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub scripts_descriptions: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub scripts_descriptions: IndexMap<String, String>,
 
     /// Additional data
     #[serde(default, skip_serializing_if = "is_null_value")]
@@ -262,12 +262,12 @@ pub struct FundingLink {
 #[serde(rename_all = "kebab-case")]
 pub struct Autoload {
     /// PSR-4 autoloading
-    #[serde(default, rename = "psr-4", skip_serializing_if = "HashMap::is_empty")]
-    pub psr4: HashMap<String, AutoloadPath>,
+    #[serde(default, rename = "psr-4", skip_serializing_if = "IndexMap::is_empty")]
+    pub psr4: IndexMap<String, AutoloadPath>,
 
     /// PSR-0 autoloading (deprecated)
-    #[serde(default, rename = "psr-0", skip_serializing_if = "HashMap::is_empty")]
-    pub psr0: HashMap<String, AutoloadPath>,
+    #[serde(default, rename = "psr-0", skip_serializing_if = "IndexMap::is_empty")]
+    pub psr0: IndexMap<String, AutoloadPath>,
 
     /// Classmap paths
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -322,7 +322,7 @@ pub enum Repositories {
     #[default]
     None,
     Array(Vec<Repository>),
-    Object(HashMap<String, Repository>),
+    Object(IndexMap<String, Repository>),
 }
 
 impl Repositories {
@@ -425,8 +425,8 @@ pub struct PackageDefinition {
     pub source: Option<SourceDefinition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dist: Option<DistDefinition>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub require: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub require: IndexMap<String, String>,
     #[serde(default, skip_serializing_if = "Autoload::is_empty")]
     pub autoload: Autoload,
 }
@@ -467,17 +467,17 @@ pub struct ComposerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_protocols: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub github_oauth: Option<HashMap<String, String>>,
+    pub github_oauth: Option<IndexMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub gitlab_oauth: Option<HashMap<String, String>>,
+    pub gitlab_oauth: Option<IndexMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub gitlab_token: Option<HashMap<String, String>>,
+    pub gitlab_token: Option<IndexMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub http_basic: Option<HashMap<String, HttpBasicAuth>>,
+    pub http_basic: Option<IndexMap<String, HttpBasicAuth>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub bearer: Option<HashMap<String, String>>,
+    pub bearer: Option<IndexMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub platform: Option<HashMap<String, PlatformValue>>,
+    pub platform: Option<IndexMap<String, PlatformValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vendor_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -591,7 +591,7 @@ impl ComposerConfig {
 #[serde(untagged)]
 pub enum PreferredInstall {
     Global(String),
-    PerPackage(HashMap<String, String>),
+    PerPackage(IndexMap<String, String>),
 }
 
 impl Default for PreferredInstall {
@@ -662,7 +662,7 @@ impl Default for PlatformCheck {
 #[serde(untagged)]
 pub enum AllowPlugins {
     Bool(bool),
-    List(HashMap<String, bool>),
+    List(IndexMap<String, bool>),
 }
 
 impl Default for AllowPlugins {
@@ -703,7 +703,7 @@ pub struct Scripts {
 
     // Custom scripts
     #[serde(flatten)]
-    pub custom: HashMap<String, ScriptValue>,
+    pub custom: IndexMap<String, ScriptValue>,
 }
 
 impl Scripts {
@@ -787,7 +787,7 @@ impl ComposerJson {
     }
 
     /// Get all dependencies (require + require-dev)
-    pub fn all_dependencies(&self) -> HashMap<String, String> {
+    pub fn all_dependencies(&self) -> IndexMap<String, String> {
         let mut deps = self.require.clone();
         deps.extend(self.require_dev.clone());
         deps

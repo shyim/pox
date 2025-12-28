@@ -871,74 +871,54 @@ fn find_transitive_dependencies(packages: &[Package], roots: &HashSet<String>) -
 /// 2. Sort keys alphabetically
 /// 3. JSON encode (compact, no pretty print)
 /// 4. MD5 hash
-fn compute_content_hash(json: &crate::json::ComposerJson) -> String {
+fn compute_content_hash(composer_json: &crate::json::ComposerJson) -> String {
     use md5::Md5;
     use md5::Digest;
-    use serde_json::{json, Map, Value};
-    use std::collections::BTreeMap;
+    use serde_json::Value;
 
-    // Build a map of relevant content, using BTreeMap for sorted keys
-    let mut relevant: BTreeMap<&str, Value> = BTreeMap::new();
+    let json_value = match serde_json::to_value(composer_json) {
+        Ok(v) => v,
+        Err(_) => return "0".repeat(32),
+    };
 
-    // Add fields in the order Composer checks them (but BTreeMap will sort alphabetically)
-    if let Some(ref name) = json.name {
-        relevant.insert("name", json!(name));
-    }
-    if let Some(ref version) = json.version {
-        relevant.insert("version", json!(version));
-    }
-    if !json.require.is_empty() {
-        // Sort the require map for consistent output
-        let sorted: BTreeMap<_, _> = json.require.iter().collect();
-        relevant.insert("require", json!(sorted));
-    }
-    if !json.require_dev.is_empty() {
-        let sorted: BTreeMap<_, _> = json.require_dev.iter().collect();
-        relevant.insert("require-dev", json!(sorted));
-    }
-    if !json.conflict.is_empty() {
-        let sorted: BTreeMap<_, _> = json.conflict.iter().collect();
-        relevant.insert("conflict", json!(sorted));
-    }
-    if !json.replace.is_empty() {
-        let sorted: BTreeMap<_, _> = json.replace.iter().collect();
-        relevant.insert("replace", json!(sorted));
-    }
-    if !json.provide.is_empty() {
-        let sorted: BTreeMap<_, _> = json.provide.iter().collect();
-        relevant.insert("provide", json!(sorted));
-    }
-    if let Some(ref min_stability) = json.minimum_stability {
-        relevant.insert("minimum-stability", json!(min_stability));
-    }
-    if let Some(prefer_stable) = json.prefer_stable {
-        relevant.insert("prefer-stable", json!(prefer_stable));
-    }
-    if !json.repositories.is_none() {
-        // Serialize repositories as-is
-        relevant.insert("repositories", serde_json::to_value(&json.repositories).unwrap_or(Value::Null));
-    }
-    if !json.extra.is_null() {
-        relevant.insert("extra", json.extra.clone());
-    }
-    // Add config.platform if it exists
-    if let Some(ref platform) = json.config.platform {
-        if !platform.is_empty() {
-            let mut config_obj = Map::new();
-            config_obj.insert("platform".to_string(), serde_json::to_value(platform).unwrap_or(Value::Null));
-            relevant.insert("config", Value::Object(config_obj));
+    let mut relevant_keys = vec![
+        "name", "version", "require", "require-dev", "conflict",
+        "replace", "provide", "minimum-stability", "prefer-stable",
+        "repositories", "extra"
+    ];
+    relevant_keys.sort();
+
+    let mut relevant_map = serde_json::Map::new();
+
+    if let Some(obj) = json_value.as_object() {
+        for key in &relevant_keys {
+            if let Some(value) = obj.get(*key) {
+                relevant_map.insert(key.to_string(), value.clone());
+            }
         }
     }
 
-    // JSON encode without pretty printing (compact)
-    // PHP's json_encode escapes forward slashes by default, so we need to match that
-    let json_str = serde_json::to_string(&relevant)
-        .unwrap_or_default()
-        .replace("/", "\\/");
+    if let Some(config) = json_value.get("config") {
+        if let Some(platform) = config.get("platform") {
+            if let Some(obj) = platform.as_object() {
+                if !obj.is_empty() {
+                    let mut config_obj = serde_json::Map::new();
+                    config_obj.insert("platform".to_string(), platform.clone());
+                    relevant_map.insert("config".to_string(), Value::Object(config_obj));
+                }
+            }
+        }
+    }
 
-    // MD5 hash
+    let json_output = match serde_json::to_string(&Value::Object(relevant_map)) {
+        Ok(s) => s,
+        Err(_) => return "0".repeat(32),
+    };
+
+    let json_with_escaped_slashes = json_output.replace("/", "\\/");
+
     let mut hasher = Md5::new();
-    hasher.update(json_str.as_bytes());
+    hasher.update(json_with_escaped_slashes.as_bytes());
     let result = hasher.finalize();
     format!("{:x}", result)
 }

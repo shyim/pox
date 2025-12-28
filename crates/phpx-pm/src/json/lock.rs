@@ -1,9 +1,55 @@
 use std::collections::HashMap;
+use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Deserializes a HashMap that might be represented as an empty array in JSON.
 /// Composer outputs `[]` for empty maps like stability-flags, platform-dev, etc.
 fn deserialize_map_or_empty_array<'de, D, K, V>(deserializer: D) -> Result<HashMap<K, V>, D::Error>
+where
+    D: Deserializer<'de>,
+    K: Deserialize<'de> + std::hash::Hash + Eq,
+    V: Deserialize<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    #[serde(bound(deserialize = "K: Deserialize<'de> + std::hash::Hash + Eq, V: Deserialize<'de>"))]
+    enum MapOrArray<K, V> {
+        Map(HashMap<K, V>),
+        #[allow(dead_code)]
+        Array(Vec<serde_json::Value>),
+    }
+
+    match MapOrArray::deserialize(deserializer)? {
+        MapOrArray::Map(map) => Ok(map),
+        MapOrArray::Array(_) => Ok(HashMap::new()),
+    }
+}
+
+/// Deserializes an IndexMap that might be represented as an empty array in JSON.
+/// Composer outputs `[]` for empty maps like stability-flags, platform-dev, etc.
+fn deserialize_indexmap_or_empty_array<'de, D, K, V>(deserializer: D) -> Result<IndexMap<K, V>, D::Error>
+where
+    D: Deserializer<'de>,
+    K: Deserialize<'de> + std::hash::Hash + Eq,
+    V: Deserialize<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    #[serde(bound(deserialize = "K: Deserialize<'de> + std::hash::Hash + Eq, V: Deserialize<'de>"))]
+    enum MapOrArray<K, V> {
+        Map(IndexMap<K, V>),
+        #[allow(dead_code)]
+        Array(Vec<serde_json::Value>),
+    }
+
+    match MapOrArray::deserialize(deserializer)? {
+        MapOrArray::Map(map) => Ok(map),
+        MapOrArray::Array(_) => Ok(IndexMap::new()),
+    }
+}
+
+// Old implementation (kept for HashMap fields)
+fn _old_deserialize_map_or_empty_array<'de, D, K, V>(deserializer: D) -> Result<HashMap<K, V>, D::Error>
 where
     D: Deserializer<'de>,
     K: Deserialize<'de> + std::hash::Hash + Eq,
@@ -120,10 +166,6 @@ fn default_readme() -> Vec<String> {
     ]
 }
 
-fn is_false(b: &bool) -> bool {
-    !*b
-}
-
 impl Default for ComposerLock {
     fn default() -> Self {
         Self {
@@ -163,28 +205,28 @@ pub struct LockedPackage {
     pub dist: Option<LockDist>,
 
     /// Required packages
-    #[serde(default, skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_map_or_empty_array")]
-    pub require: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty", deserialize_with = "deserialize_indexmap_or_empty_array")]
+    pub require: IndexMap<String, String>,
 
     /// Development requirements
-    #[serde(default, rename = "require-dev", skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_map_or_empty_array")]
-    pub require_dev: HashMap<String, String>,
+    #[serde(default, rename = "require-dev", skip_serializing_if = "IndexMap::is_empty", deserialize_with = "deserialize_indexmap_or_empty_array")]
+    pub require_dev: IndexMap<String, String>,
 
     /// Conflicts
-    #[serde(default, skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_map_or_empty_array")]
-    pub conflict: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty", deserialize_with = "deserialize_indexmap_or_empty_array")]
+    pub conflict: IndexMap<String, String>,
 
     /// Provided packages
-    #[serde(default, skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_map_or_empty_array")]
-    pub provide: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty", deserialize_with = "deserialize_indexmap_or_empty_array")]
+    pub provide: IndexMap<String, String>,
 
     /// Replaced packages
-    #[serde(default, skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_map_or_empty_array")]
-    pub replace: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty", deserialize_with = "deserialize_indexmap_or_empty_array")]
+    pub replace: IndexMap<String, String>,
 
     /// Suggested packages
-    #[serde(default, skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_map_or_empty_array")]
-    pub suggest: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty", deserialize_with = "deserialize_indexmap_or_empty_array")]
+    pub suggest: IndexMap<String, String>,
 
     /// Binary executables
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

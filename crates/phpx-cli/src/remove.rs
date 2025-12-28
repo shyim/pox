@@ -99,8 +99,8 @@ pub async fn execute(args: RemoveArgs) -> Result<i32> {
 
     for name in &args.packages {
         // Try to remove from require or require-dev
-        let was_in_require = composer.composer_json.require.remove(name).is_some();
-        let was_in_dev = composer.composer_json.require_dev.remove(name).is_some();
+        let was_in_require = composer.composer_json.require.shift_remove(name).is_some();
+        let was_in_dev = composer.composer_json.require_dev.shift_remove(name).is_some();
 
         if was_in_require || was_in_dev {
             println!("  {} {}",

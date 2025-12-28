@@ -1,7 +1,7 @@
 use super::{Autoload, Dist, Link, Source};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 /// Package stability levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -176,7 +176,7 @@ pub struct Funding {
 }
 
 /// Scripts configuration (composer event handlers)
-pub type Scripts = HashMap<String, ScriptHandler>;
+pub type Scripts = IndexMap<String, ScriptHandler>;
 
 /// Script handler which can be a single command or multiple commands
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,28 +225,28 @@ pub struct Package {
     pub dist: Option<Dist>,
 
     /// Required dependencies
-    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
-    pub require: HashMap<String, String>,
+    #[serde(skip_serializing_if = "IndexMap::is_empty", default)]
+    pub require: IndexMap<String, String>,
 
     /// Development dependencies
-    #[serde(rename = "require-dev", skip_serializing_if = "HashMap::is_empty", default)]
-    pub require_dev: HashMap<String, String>,
+    #[serde(rename = "require-dev", skip_serializing_if = "IndexMap::is_empty", default)]
+    pub require_dev: IndexMap<String, String>,
 
     /// Conflicting packages
-    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
-    pub conflict: HashMap<String, String>,
+    #[serde(skip_serializing_if = "IndexMap::is_empty", default)]
+    pub conflict: IndexMap<String, String>,
 
     /// Provided virtual packages
-    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
-    pub provide: HashMap<String, String>,
+    #[serde(skip_serializing_if = "IndexMap::is_empty", default)]
+    pub provide: IndexMap<String, String>,
 
     /// Replaced packages
-    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
-    pub replace: HashMap<String, String>,
+    #[serde(skip_serializing_if = "IndexMap::is_empty", default)]
+    pub replace: IndexMap<String, String>,
 
     /// Suggested packages
-    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
-    pub suggest: HashMap<String, String>,
+    #[serde(skip_serializing_if = "IndexMap::is_empty", default)]
+    pub suggest: IndexMap<String, String>,
 
     /// Autoload configuration
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -314,7 +314,7 @@ pub struct Package {
     pub funding: Vec<Funding>,
 
     /// Scripts (composer event handlers)
-    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
+    #[serde(skip_serializing_if = "IndexMap::is_empty", default)]
     pub scripts: Scripts,
 
     /// Whether the package is abandoned
@@ -377,12 +377,12 @@ impl Package {
             stability: Some(stability),
             source: None,
             dist: None,
-            require: HashMap::new(),
-            require_dev: HashMap::new(),
-            conflict: HashMap::new(),
-            provide: HashMap::new(),
-            replace: HashMap::new(),
-            suggest: HashMap::new(),
+            require: IndexMap::new(),
+            require_dev: IndexMap::new(),
+            conflict: IndexMap::new(),
+            provide: IndexMap::new(),
+            replace: IndexMap::new(),
+            suggest: IndexMap::new(),
             autoload: None,
             autoload_dev: None,
             include_path: Vec::new(),
@@ -399,7 +399,7 @@ impl Package {
             authors: Vec::new(),
             support: None,
             funding: Vec::new(),
-            scripts: HashMap::new(),
+            scripts: IndexMap::new(),
             abandoned: None,
             archive: None,
             default_branch: None,
@@ -423,7 +423,7 @@ impl Package {
     }
 
     /// Helper to replace self.version in a constraint map
-    fn replace_self_version_in_map(map: &mut HashMap<String, String>, version_constraint: &str) {
+    fn replace_self_version_in_map(map: &mut IndexMap<String, String>, version_constraint: &str) {
         for constraint in map.values_mut() {
             if constraint == "self.version" {
                 *constraint = version_constraint.to_string();

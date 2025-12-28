@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
+use indexmap::IndexMap;
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 
@@ -212,15 +213,15 @@ pub struct InstalledPackage {
     #[serde(default)]
     pub dist: Option<InstalledDist>,
     #[serde(default)]
-    pub require: HashMap<String, String>,
+    pub require: IndexMap<String, String>,
     #[serde(default, rename = "require-dev")]
-    pub require_dev: HashMap<String, String>,
+    pub require_dev: IndexMap<String, String>,
     #[serde(default)]
-    pub conflict: HashMap<String, String>,
+    pub conflict: IndexMap<String, String>,
     #[serde(default)]
-    pub replace: HashMap<String, String>,
+    pub replace: IndexMap<String, String>,
     #[serde(default)]
-    pub provide: HashMap<String, String>,
+    pub provide: IndexMap<String, String>,
     #[serde(default)]
     pub autoload: serde_json::Value,
     #[serde(default)]
