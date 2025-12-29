@@ -60,6 +60,7 @@ pub enum PmCommands {
     Update(UpdateArgs),
 
     /// Add a package to the project (alias for top-level add)
+    #[command(alias = "require")]
     Add(AddArgs),
 
     /// Remove a package from the project (alias for top-level remove)
