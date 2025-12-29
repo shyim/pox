@@ -8,6 +8,7 @@ pub mod run;
 pub mod platform;
 mod why;
 mod show;
+mod search;
 
 use clap::Subcommand;
 use anyhow::Result;
@@ -19,6 +20,7 @@ pub use clear_cache::ClearCacheArgs;
 pub use run::RunArgs;
 pub use why::WhyArgs;
 pub use show::ShowArgs;
+pub use search::SearchArgs;
 
 // Re-export args for pm subcommand aliases
 pub use crate::install::InstallArgs;
@@ -52,6 +54,9 @@ pub enum PmCommands {
     #[command(alias = "info")]
     Show(ShowArgs),
 
+    /// Search for packages
+    Search(SearchArgs),
+
     /// Install project dependencies from composer.lock (alias for top-level install)
     #[command(alias = "i")]
     Install(InstallArgs),
@@ -78,6 +83,7 @@ pub async fn execute(command: PmCommands) -> Result<i32> {
         PmCommands::Why(args) => why::execute(args, false).await,
         PmCommands::WhyNot(args) => why::execute(args, true).await,
         PmCommands::Show(args) => show::execute(args).await,
+        PmCommands::Search(args) => search::execute(args).await,
         PmCommands::Install(args) => crate::install::execute(args).await,
         PmCommands::Update(args) => crate::update::execute(args).await,
         PmCommands::Add(args) => crate::add::execute(args).await,

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use indexmap::IndexMap;
 use std::time::Duration;
@@ -7,11 +7,12 @@ use async_trait::async_trait;
 use tokio::sync::RwLock;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
+use regex::Regex;
 
 use super::traits::{Repository, SearchMode, SearchResult, ProviderInfo};
 use crate::cache::{RepoCache, CacheMetadata};
 use crate::config::AuthConfig;
-use crate::package::{Package, Dist, Source, Autoload, AutoloadPath};
+use crate::package::{Package, Dist, Source, Autoload, AutoloadPath, Stability};
 use phpx_semver::{Constraint, Operator, VersionParser};
 
 /// Default TTL for cached metadata (10 minutes, matching Composer)
@@ -23,6 +24,33 @@ enum FetchResult {
     NotModified,
     /// New data received with metadata
     Modified(String, CacheMetadata),
+}
+
+/// Mirror configuration for source repositories
+#[derive(Debug, Clone)]
+pub struct SourceMirror {
+    /// Mirror URL pattern
+    pub url: String,
+    /// Whether this mirror is preferred
+    pub preferred: bool,
+}
+
+/// Mirror configuration for dist (archives)
+#[derive(Debug, Clone)]
+pub struct DistMirror {
+    /// Mirror URL pattern
+    pub url: String,
+    /// Whether this mirror is preferred
+    pub preferred: bool,
+}
+
+/// Stability filter configuration
+#[derive(Debug, Clone, Default)]
+pub struct StabilityConfig {
+    /// Acceptable stabilities (keys are stability names, values are priority)
+    pub acceptable: HashMap<Stability, u8>,
+    /// Per-package stability flags (package name -> stability)
+    pub flags: HashMap<String, Stability>,
 }
 
 /// Custom deserializer that handles the Packagist v2 "__unset" marker.
@@ -56,6 +84,8 @@ pub struct ComposerRepository {
     name: String,
     /// Repository URL
     url: String,
+    /// Base URL (derived from url, without packages.json path)
+    base_url: String,
     /// In-memory package cache
     packages: RwLock<HashMap<String, Vec<Arc<Package>>>>,
     /// HTTP client for API requests
@@ -70,14 +100,52 @@ pub struct ComposerRepository {
     loading_locks: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Notification URL from repository metadata
     notify_batch: RwLock<Option<String>>,
+    /// Search URL template
+    search_url: RwLock<Option<String>>,
+    /// Providers API URL (for getting packages that provide a virtual package)
+    providers_api_url: RwLock<Option<String>>,
+    /// Lazy providers URL (V2 metadata-url)
+    lazy_providers_url: RwLock<Option<String>>,
+    /// List URL for package name enumeration
+    list_url: RwLock<Option<String>>,
+    /// Available packages (explicit list from repo)
+    available_packages: RwLock<Option<HashSet<String>>>,
+    /// Available package patterns (regex patterns)
+    available_package_patterns: RwLock<Option<Vec<Regex>>>,
+    /// Whether repo has an available packages list
+    has_available_package_list: RwLock<bool>,
+    /// Source mirrors (by VCS type: git, hg)
+    source_mirrors: RwLock<HashMap<String, Vec<SourceMirror>>>,
+    /// Dist mirrors
+    dist_mirrors: RwLock<Vec<DistMirror>>,
+    /// Whether the root server file has been loaded
+    root_loaded: RwLock<bool>,
+    /// Whether we're in degraded mode (network issues but using cache)
+    degraded_mode: RwLock<bool>,
+    /// Packages that returned 404 (don't re-fetch)
+    packages_not_found: RwLock<HashSet<String>>,
 }
 
 impl ComposerRepository {
     /// Create a new Composer repository
     pub fn new(name: impl Into<String>, url: impl Into<String>) -> Self {
+        let url_str = url.into();
+        // Normalize URL: ensure it ends without trailing slash
+        let url_normalized = url_str.trim_end_matches('/').to_string();
+
+        // Derive base URL (remove packages.json if present)
+        let base_url = if url_normalized.ends_with(".json") {
+            // Remove the JSON file to get base
+            url_normalized.rsplit_once('/').map(|(base, _)| base.to_string())
+                .unwrap_or_else(|| url_normalized.clone())
+        } else {
+            url_normalized.clone()
+        };
+
         Self {
             name: name.into(),
-            url: url.into(),
+            url: url_normalized,
+            base_url,
             packages: RwLock::new(HashMap::new()),
             loading_locks: RwLock::new(HashMap::new()),
             client: reqwest::Client::builder()
@@ -88,6 +156,18 @@ impl ComposerRepository {
             cache_ttl: DEFAULT_CACHE_TTL,
             auth: None,
             notify_batch: RwLock::new(None),
+            search_url: RwLock::new(None),
+            providers_api_url: RwLock::new(None),
+            lazy_providers_url: RwLock::new(None),
+            list_url: RwLock::new(None),
+            available_packages: RwLock::new(None),
+            available_package_patterns: RwLock::new(None),
+            has_available_package_list: RwLock::new(false),
+            source_mirrors: RwLock::new(HashMap::new()),
+            dist_mirrors: RwLock::new(Vec::new()),
+            root_loaded: RwLock::new(false),
+            degraded_mode: RwLock::new(false),
+            packages_not_found: RwLock::new(HashSet::new()),
         }
     }
 
@@ -154,13 +234,38 @@ impl ComposerRepository {
         format!("provider-{}.json", package_name.replace('/', "~"))
     }
 
-    async fn ensure_notify_batch(&self) {
-        if self.notify_batch.read().await.is_some() {
-            return;
+    fn canonicalize_url(&self, url: &str) -> String {
+        if url.starts_with('/') {
+            if let Some(pos) = self.base_url.find("://") {
+                let after_scheme = &self.base_url[pos + 3..];
+                if let Some(slash_pos) = after_scheme.find('/') {
+                    let host_part = &self.base_url[..pos + 3 + slash_pos];
+                    return format!("{}{}", host_part, url);
+                }
+            }
+            format!("{}{}", self.base_url, url)
+        } else {
+            url.to_string()
+        }
+    }
+
+    fn package_name_to_regex(pattern: &str) -> Option<Regex> {
+        let escaped = regex::escape(pattern);
+        let regex_str = escaped.replace(r"\*", ".*");
+        Regex::new(&format!("^{}$", regex_str)).ok()
+    }
+
+    async fn load_root_server_file(&self) -> Result<(), String> {
+        if *self.root_loaded.read().await {
+            return Ok(());
         }
 
-        let packages_url = format!("{}/packages.json", self.url);
-        let cache_key = "root-packages.json".to_string();
+        let packages_url = if self.url.ends_with(".json") {
+            self.url.clone()
+        } else {
+            format!("{}/packages.json", self.url)
+        };
+        let cache_key = "packages.json".to_string();
 
         let body = if let Some(ref file_cache) = self.file_cache {
             if let Ok(Some((cached_content, metadata))) = file_cache.read(&cache_key) {
@@ -177,7 +282,10 @@ impl ComposerRepository {
                                 file_cache.write(&cache_key, body.as_bytes(), &new_metadata).ok();
                                 body
                             }
-                            Err(_) => String::from_utf8_lossy(&cached_content).to_string(),
+                            Err(_) => {
+                                *self.degraded_mode.write().await = true;
+                                String::from_utf8_lossy(&cached_content).to_string()
+                            }
                         }
                     } else {
                         match self.fetch_fresh(&packages_url).await {
@@ -185,7 +293,10 @@ impl ComposerRepository {
                                 file_cache.write(&cache_key, body.as_bytes(), &new_metadata).ok();
                                 body
                             }
-                            Err(_) => String::from_utf8_lossy(&cached_content).to_string(),
+                            Err(_) => {
+                                *self.degraded_mode.write().await = true;
+                                String::from_utf8_lossy(&cached_content).to_string()
+                            }
                         }
                     }
                 } else {
@@ -197,31 +308,186 @@ impl ComposerRepository {
                         file_cache.write(&cache_key, body.as_bytes(), &metadata).ok();
                         body
                     }
-                    Err(_) => return,
+                    Err(e) => return Err(e),
                 }
             }
         } else {
             match self.fetch_fresh(&packages_url).await {
                 Ok((body, _)) => body,
-                Err(_) => return,
+                Err(e) => return Err(e),
             }
         };
 
-        if let Ok(root_meta) = serde_json::from_str::<serde_json::Value>(&body) {
-            if let Some(notify) = root_meta.get("notify-batch").and_then(|v| v.as_str()) {
-                *self.notify_batch.write().await = Some(notify.to_string());
-            }
+        let data: Value = serde_json::from_str(&body)
+            .map_err(|e| format!("Failed to parse packages.json: {}", e))?;
+
+        if let Some(notify) = data.get("notify-batch").and_then(|v| v.as_str()) {
+            *self.notify_batch.write().await = Some(self.canonicalize_url(notify));
+        } else if let Some(notify) = data.get("notify").and_then(|v| v.as_str()) {
+            *self.notify_batch.write().await = Some(self.canonicalize_url(notify));
         }
+
+        if let Some(search) = data.get("search").and_then(|v| v.as_str()) {
+            *self.search_url.write().await = Some(self.canonicalize_url(search));
+        }
+
+        if let Some(list) = data.get("list").and_then(|v| v.as_str()) {
+            *self.list_url.write().await = Some(self.canonicalize_url(list));
+        }
+
+        if let Some(providers_api) = data.get("providers-api").and_then(|v| v.as_str()) {
+            *self.providers_api_url.write().await = Some(self.canonicalize_url(providers_api));
+        }
+        if let Some(mirrors) = data.get("mirrors").and_then(|v| v.as_array()) {
+            let mut source_mirrors = HashMap::new();
+            let mut dist_mirrors = Vec::new();
+
+            for mirror in mirrors {
+                let preferred = mirror.get("preferred").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                if let Some(git_url) = mirror.get("git-url").and_then(|v| v.as_str()) {
+                    source_mirrors.entry("git".to_string())
+                        .or_insert_with(Vec::new)
+                        .push(SourceMirror {
+                            url: git_url.to_string(),
+                            preferred,
+                        });
+                }
+
+                if let Some(hg_url) = mirror.get("hg-url").and_then(|v| v.as_str()) {
+                    source_mirrors.entry("hg".to_string())
+                        .or_insert_with(Vec::new)
+                        .push(SourceMirror {
+                            url: hg_url.to_string(),
+                            preferred,
+                        });
+                }
+
+                if let Some(dist_url) = mirror.get("dist-url").and_then(|v| v.as_str()) {
+                    dist_mirrors.push(DistMirror {
+                        url: self.canonicalize_url(dist_url),
+                        preferred,
+                    });
+                }
+            }
+
+            *self.source_mirrors.write().await = source_mirrors;
+            *self.dist_mirrors.write().await = dist_mirrors;
+        }
+
+        if let Some(metadata_url) = data.get("metadata-url").and_then(|v| v.as_str()) {
+            *self.lazy_providers_url.write().await = Some(self.canonicalize_url(metadata_url));
+
+            if let Some(available) = data.get("available-packages").and_then(|v| v.as_array()) {
+                let packages: HashSet<String> = available.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.to_lowercase())
+                    .collect();
+                *self.available_packages.write().await = Some(packages);
+                *self.has_available_package_list.write().await = true;
+            }
+
+            if let Some(patterns) = data.get("available-package-patterns").and_then(|v| v.as_array()) {
+                let regexes: Vec<Regex> = patterns.iter()
+                    .filter_map(|v| v.as_str())
+                    .filter_map(Self::package_name_to_regex)
+                    .collect();
+                if !regexes.is_empty() {
+                    *self.available_package_patterns.write().await = Some(regexes);
+                    *self.has_available_package_list.write().await = true;
+                }
+            }
+        } else if let Some(providers_lazy_url) = data.get("providers-lazy-url").and_then(|v| v.as_str()) {
+            *self.lazy_providers_url.write().await = Some(self.canonicalize_url(providers_lazy_url));
+        }
+
+        *self.root_loaded.write().await = true;
+        Ok(())
     }
 
-    /// Load package metadata from the Packagist v2 API with caching
+    async fn lazy_providers_repo_contains(&self, name: &str) -> bool {
+        let name_lower = name.to_lowercase();
+
+        if let Some(ref available) = *self.available_packages.read().await {
+            if available.contains(&name_lower) {
+                return true;
+            }
+        }
+
+        if let Some(ref patterns) = *self.available_package_patterns.read().await {
+            for pattern in patterns {
+                if pattern.is_match(&name_lower) {
+                    return true;
+                }
+            }
+        }
+
+        !*self.has_available_package_list.read().await
+    }
+
+    async fn load_package_list(&self, filter: Option<&str>) -> Result<Vec<String>, String> {
+        let list_url = self.list_url.read().await.clone()
+            .ok_or_else(|| "No list URL available".to_string())?;
+
+        let url = if let Some(f) = filter {
+            format!("{}?filter={}", list_url, urlencoding::encode(f))
+        } else {
+            list_url
+        };
+
+        let cache_key = if filter.is_some() {
+            None
+        } else {
+            Some("package-list.txt".to_string())
+        };
+
+        if let (Some(ref key), Some(ref file_cache)) = (&cache_key, &self.file_cache) {
+            if let Ok(Some(age)) = file_cache.age(key) {
+                if age < self.cache_ttl {
+                    if let Ok(Some((content, _))) = file_cache.read(key) {
+                        let names: Vec<String> = String::from_utf8_lossy(&content)
+                            .lines()
+                            .map(|s| s.to_string())
+                            .collect();
+                        return Ok(names);
+                    }
+                }
+            }
+        }
+
+        let (body, _) = self.fetch_fresh(&url).await?;
+        let data: Value = serde_json::from_str(&body)
+            .map_err(|e| format!("Failed to parse package list: {}", e))?;
+
+        let names: Vec<String> = data.get("packageNames")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+
+        if let (Some(ref key), Some(ref file_cache)) = (&cache_key, &self.file_cache) {
+            let content = names.join("\n");
+            file_cache.write(key, content.as_bytes(), &CacheMetadata::default()).ok();
+        }
+
+        Ok(names)
+    }
+
     async fn load_package_metadata(&self, name: &str) -> Result<Vec<Arc<Package>>, String> {
         let name_lower = name.to_lowercase();
         let name = name_lower.as_str();
 
-        self.ensure_notify_batch().await;
+        self.load_root_server_file().await.ok();
 
-        // Check in-memory cache first
+        if self.packages_not_found.read().await.contains(name) {
+            return Ok(Vec::new());
+        }
+
+        if *self.has_available_package_list.read().await {
+            if !self.lazy_providers_repo_contains(name).await {
+                return Ok(Vec::new());
+            }
+        }
+
         {
             let packages = self.packages.read().await;
             if let Some(pkgs) = packages.get(name) {
@@ -230,7 +496,6 @@ impl ComposerRepository {
             }
         }
 
-        // Get or create a per-package lock to prevent concurrent loads
         let lock = {
             let mut locks = self.loading_locks.write().await;
             locks.entry(name.to_string())
@@ -238,10 +503,8 @@ impl ComposerRepository {
                 .clone()
         };
 
-        // Acquire the lock for this package
         let _guard = lock.lock().await;
 
-        // Check cache again after acquiring lock (another task may have loaded it)
         {
             let packages = self.packages.read().await;
             if let Some(pkgs) = packages.get(name) {
@@ -251,16 +514,17 @@ impl ComposerRepository {
         }
 
         let cache_key = Self::cache_key(name);
-        let url = format!("{}/p2/{}.json", self.url, name);
 
-        // Try to use file cache with conditional request
+        let url = if let Some(ref lazy_url) = *self.lazy_providers_url.read().await {
+            lazy_url.replace("%package%", name)
+        } else {
+            format!("{}/p2/{}.json", self.url, name)
+        };
+
         if let Some(ref file_cache) = self.file_cache {
-            // Check if we have cached data
             if let Ok(Some((cached_content, metadata))) = file_cache.read(&cache_key) {
-                // Check if cache is still fresh (within TTL)
                 if let Ok(Some(age)) = file_cache.age(&cache_key) {
                     if age < self.cache_ttl {
-                        // Cache is fresh, use it directly
                         log::trace!("Cache hit (file, fresh): {} (age: {:?})", name, age);
                         if let Ok(result) = self.parse_and_cache_response(name, &cached_content).await {
                             return Ok(result);
@@ -268,12 +532,10 @@ impl ComposerRepository {
                     }
                 }
 
-                // Cache exists but may be stale - try conditional request
                 if let Some(last_modified) = &metadata.last_modified {
                     log::debug!("Cache stale, checking: {}", name);
                     match self.fetch_if_modified(&url, last_modified).await {
                         Ok(FetchResult::NotModified) => {
-                            // 304 Not Modified - touch cache to reset TTL
                             log::trace!("Cache valid (304): {}", name);
                             file_cache.write(&cache_key, &cached_content, &metadata).ok();
                             if let Ok(result) = self.parse_and_cache_response(name, &cached_content).await {
@@ -281,7 +543,6 @@ impl ComposerRepository {
                             }
                         }
                         Ok(FetchResult::Modified(body, new_metadata)) => {
-                            // New data received - update cache
                             log::debug!("Cache updated: {} ({} bytes)", name, body.len());
                             file_cache.write(&cache_key, body.as_bytes(), &new_metadata).ok();
                             if let Ok(result) = self.parse_and_cache_response(name, body.as_bytes()).await {
@@ -289,7 +550,6 @@ impl ComposerRepository {
                             }
                         }
                         Err(_) => {
-                            // Network error - fall back to cached data
                             log::debug!("Network error, using stale cache: {}", name);
                             if let Ok(result) = self.parse_and_cache_response(name, &cached_content).await {
                                 return Ok(result);
@@ -300,11 +560,9 @@ impl ComposerRepository {
             }
         }
 
-        // No cache or cache miss - fetch fresh data
         log::debug!("Cache miss, fetching: {}", name);
         let (body, metadata) = self.fetch_fresh(&url).await?;
 
-        // Store in file cache if available
         if let Some(ref file_cache) = self.file_cache {
             file_cache.write(&cache_key, body.as_bytes(), &metadata).ok();
         }
@@ -312,7 +570,6 @@ impl ComposerRepository {
         self.parse_and_cache_response(name, body.as_bytes()).await
     }
 
-    /// Fetch with If-Modified-Since header
     async fn fetch_if_modified(&self, url: &str, last_modified: &str) -> Result<FetchResult, String> {
         let request = self.client
             .get(url)
@@ -331,7 +588,6 @@ impl ComposerRepository {
             return Err(format!("HTTP error: {}", response.status()));
         }
 
-        // Extract Last-Modified header from response
         let new_last_modified = response
             .headers()
             .get("last-modified")
@@ -349,7 +605,6 @@ impl ComposerRepository {
         Ok(FetchResult::Modified(body, metadata))
     }
 
-    /// Fetch fresh data without conditional headers
     async fn fetch_fresh(&self, url: &str) -> Result<(String, CacheMetadata), String> {
         log::debug!("HTTP GET {}", url);
         let start = std::time::Instant::now();
@@ -364,16 +619,13 @@ impl ComposerRepository {
         if !response.status().is_success() {
             let status = response.status();
             log::debug!("HTTP {} {} in {:?}", status.as_u16(), url, start.elapsed());
-            // 404 is expected for non-existent packages, but other errors should be logged
             if status.as_u16() == 404 {
                 return Ok((String::new(), CacheMetadata::default()));
             } else {
-                // 429, 5xx, etc. - these are transient errors, return error so caller can retry
                 return Err(format!("HTTP {} for {}", status.as_u16(), url));
             }
         }
 
-        // Extract Last-Modified header
         let last_modified = response
             .headers()
             .get("last-modified")
@@ -393,7 +645,6 @@ impl ComposerRepository {
         Ok((body, metadata))
     }
 
-    /// Parse response body and cache in memory
     async fn parse_and_cache_response(&self, name: &str, body: &[u8]) -> Result<Vec<Arc<Package>>, String> {
         if body.is_empty() {
             return Ok(Vec::new());
@@ -402,19 +653,10 @@ impl ComposerRepository {
         let data: PackagistResponse = serde_json::from_slice(body)
             .map_err(|e| format!("Failed to parse package metadata: {}", e))?;
 
-        // Convert to Package structs
         let mut result = Vec::new();
-
         let notify_batch = self.notify_batch.read().await.clone();
 
         if let Some(versions) = data.packages.get(name) {
-            // Packagist v2 minified format uses delta compression:
-            // - First version has all fields
-            // - Subsequent versions only include fields that CHANGED from the PREVIOUS version
-            // - `null` value means "same as previous version"
-            // - "__unset" string means "field was removed"
-            //
-            // We must expand each version based on the PREVIOUS expanded version, not the first.
             let expanded_versions = Self::expand_minified_versions(versions);
             for expanded_data in &expanded_versions {
                 let pkg = self.convert_to_package(name, expanded_data, notify_batch.as_deref());
@@ -422,7 +664,6 @@ impl ComposerRepository {
             }
         }
 
-        // Cache the results in memory
         {
             let mut packages = self.packages.write().await;
             packages.insert(name.to_string(), result.clone());
@@ -486,27 +727,20 @@ impl ComposerRepository {
         result
     }
 
-    /// Apply delta for Option fields: if current has value, use it; otherwise inherit from prev
     fn apply_delta_opt<T: Clone>(current: &Option<T>, prev: &Option<T>) -> Option<T> {
         current.clone().or_else(|| prev.clone())
     }
 
-    /// Apply delta for HashMap fields: if current has value, use it; otherwise inherit from prev
     fn apply_delta_hashmap(current: &Option<IndexMap<String, String>>, prev: &Option<IndexMap<String, String>>) -> Option<IndexMap<String, String>> {
         current.clone().or_else(|| prev.clone())
     }
 
-    /// Convert Packagist version data to a Package.
-    /// The data should already be expanded (not minified).
     fn convert_to_package(&self, package_name: &str, data: &PackagistVersion, notify_batch: Option<&str>) -> Package {
-        // Use normalized version if available, otherwise use the pretty version
         let version = data.version_normalized.as_ref()
             .unwrap_or(&data.version);
         let mut pkg = Package::new(package_name, version);
-        // Store the pretty version separately
         pkg.pretty_version = Some(data.version.clone());
 
-        // Data is already expanded, so we just use it directly
         pkg.description = data.description.clone();
         pkg.homepage = data.homepage.clone();
         pkg.license = data.license.clone().unwrap_or_default();
@@ -533,7 +767,6 @@ impl ComposerRepository {
             if let Some(ref r) = dist.reference {
                 d = d.with_reference(r);
             }
-            // Only set shasum if it's non-empty (Packagist often returns empty string)
             if let Some(ref s) = dist.shasum {
                 if !s.is_empty() {
                     d = d.with_shasum(s);
@@ -590,8 +823,6 @@ impl ComposerRepository {
         }
 
         pkg.extra = data.extra.clone();
-
-        // Replace self.version constraints with actual version
         pkg.replace_self_version();
 
         pkg
@@ -633,6 +864,97 @@ impl ComposerRepository {
             _ => AutoloadPath::Single(String::new()),
         }
     }
+
+    pub async fn get_package_names(&self, filter: Option<&str>) -> Vec<String> {
+        self.load_root_server_file().await.ok();
+
+        if self.list_url.read().await.is_some() {
+            return self.load_package_list(filter).await.unwrap_or_default();
+        }
+
+        if let Some(ref available) = *self.available_packages.read().await {
+            let names: Vec<String> = available.iter().cloned().collect();
+
+            if let Some(f) = filter {
+                if let Some(regex) = Self::package_name_to_regex(f) {
+                    return names.into_iter().filter(|n| regex.is_match(n)).collect();
+                }
+            }
+
+            return names;
+        }
+
+        Vec::new()
+    }
+
+    pub async fn load_package_metadata_with_dev(
+        &self,
+        name: &str,
+        include_dev: bool,
+    ) -> Result<Vec<Arc<Package>>, String> {
+        let mut all_packages = self.load_package_metadata(name).await?;
+
+        if include_dev {
+            let dev_name = format!("{}~dev", name);
+            if let Ok(dev_packages) = self.load_package_metadata(&dev_name).await {
+                let existing_versions: HashSet<_> = all_packages.iter()
+                    .map(|p| p.version.clone())
+                    .collect();
+
+                for pkg in dev_packages {
+                    if !existing_versions.contains(&pkg.version) {
+                        all_packages.push(pkg);
+                    }
+                }
+            }
+        }
+
+        Ok(all_packages)
+    }
+
+    pub fn is_stability_acceptable(
+        stability: Stability,
+        acceptable_stabilities: &HashMap<Stability, u8>,
+        package_name: &str,
+        stability_flags: &HashMap<String, Stability>,
+    ) -> bool {
+        if let Some(flag_stability) = stability_flags.get(package_name) {
+            return stability.priority() <= flag_stability.priority();
+        }
+
+        acceptable_stabilities.contains_key(&stability)
+    }
+
+    pub fn filter_by_stability(
+        packages: Vec<Arc<Package>>,
+        acceptable_stabilities: &HashMap<Stability, u8>,
+        stability_flags: &HashMap<String, Stability>,
+    ) -> Vec<Arc<Package>> {
+        packages.into_iter()
+            .filter(|pkg| {
+                let stability = pkg.stability.unwrap_or(Stability::Stable);
+                Self::is_stability_acceptable(
+                    stability,
+                    acceptable_stabilities,
+                    &pkg.name,
+                    stability_flags,
+                )
+            })
+            .collect()
+    }
+
+    pub async fn get_dist_mirrors(&self) -> Vec<DistMirror> {
+        self.load_root_server_file().await.ok();
+        self.dist_mirrors.read().await.clone()
+    }
+
+    pub async fn get_source_mirrors(&self, vcs_type: &str) -> Vec<SourceMirror> {
+        self.load_root_server_file().await.ok();
+        self.source_mirrors.read().await
+            .get(vcs_type)
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
 #[async_trait]
@@ -661,84 +983,200 @@ impl Repository for ComposerRepository {
     ) -> Vec<Arc<Package>> {
         let packages = self.find_packages(name).await;
 
-        // Handle wildcard constraints
         if constraint == "*" || constraint.is_empty() {
             return packages;
         }
 
-        // Parse the constraint
         let parser = VersionParser::new();
         let parsed_constraint = match parser.parse_constraints(constraint) {
             Ok(c) => c,
-            Err(_) => return packages, // Be permissive on parse errors
+            Err(_) => return packages,
         };
 
-        // Filter packages by constraint
         packages.into_iter()
             .filter(|pkg| {
-                // Normalize the package version
                 let normalized = parser.normalize(&pkg.version)
                     .unwrap_or_else(|_| pkg.version.clone());
 
-                // Create a version constraint (== normalized_version)
                 let version_constraint = match Constraint::new(Operator::Equal, normalized) {
                     Ok(c) => c,
-                    Err(_) => return true, // Be permissive
+                    Err(_) => return true,
                 };
 
-                // Check if the version matches the constraint
                 parsed_constraint.matches(&version_constraint)
             })
             .collect()
     }
 
     async fn get_packages(&self) -> Vec<Arc<Package>> {
-        // For Composer repositories, we don't enumerate all packages
-        // (there could be millions)
-        Vec::new()
-    }
+        self.load_root_server_file().await.ok();
 
-    async fn search(&self, query: &str, _mode: SearchMode) -> Vec<SearchResult> {
-        // Search using Packagist search API
-        let url = format!("{}/search.json?q={}", self.url, urlencoding::encode(query));
-
-        let response = match self.client.get(&url).send().await {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
-
-        if !response.status().is_success() {
-            return Vec::new();
+        if let Some(ref available) = *self.available_packages.read().await {
+            log::debug!("Repository has {} available packages", available.len());
         }
 
-        let data: SearchResponse = match response.json().await {
-            Ok(d) => d,
-            Err(_) => return Vec::new(),
-        };
-
-        data.results.into_iter().map(|r| {
-            let abandoned = match r.abandoned {
-                Some(Value::Bool(true)) => Some("".to_string()),
-                Some(Value::String(s)) => Some(s),
-                _ => None,
-            };
-
-            SearchResult {
-                name: r.name,
-                description: r.description,
-                url: r.url,
-                abandoned,
-                downloads: r.downloads,
-                favers: r.favers,
-            }
-        }).collect()
-    }
-
-    async fn get_providers(&self, _package_name: &str) -> Vec<ProviderInfo> {
         Vec::new()
     }
 
-    /// Optimized batch loading with concurrent HTTP requests.
+    async fn search(&self, query: &str, mode: SearchMode) -> Vec<SearchResult> {
+        self.load_root_server_file().await.ok();
+
+        match mode {
+            SearchMode::Fulltext => {
+                let search_url = self.search_url.read().await.clone();
+                let url = if let Some(ref base_search) = search_url {
+                    base_search
+                        .replace("%query%", &urlencoding::encode(query))
+                        .replace("%type%", "")
+                } else {
+                    format!("{}/search.json?q={}", self.url, urlencoding::encode(query))
+                };
+
+                let response = match self.client.get(&url).send().await {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+
+                if !response.status().is_success() {
+                    return Vec::new();
+                }
+
+                let data: SearchResponse = match response.json().await {
+                    Ok(d) => d,
+                    Err(_) => return Vec::new(),
+                };
+
+                data.results.into_iter()
+                    .filter(|r| !r.is_virtual.unwrap_or(false))
+                    .map(|r| {
+                        let abandoned = match r.abandoned {
+                            Some(Value::Bool(true)) => Some("".to_string()),
+                            Some(Value::String(s)) => Some(s),
+                            _ => None,
+                        };
+
+                        SearchResult {
+                            name: r.name,
+                            description: r.description,
+                            url: r.url,
+                            abandoned,
+                            downloads: r.downloads,
+                            favers: r.favers,
+                        }
+                    })
+                    .collect()
+            }
+            SearchMode::Vendor => {
+                let package_names = self.get_package_names(None).await;
+
+                let regex_str = query.split_whitespace()
+                    .map(|w| regex::escape(w))
+                    .collect::<Vec<_>>()
+                    .join("|");
+                let regex = match Regex::new(&format!("(?i){}", regex_str)) {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+
+                let mut vendors = HashSet::new();
+                for name in package_names {
+                    if let Some(vendor) = name.split('/').next() {
+                        if regex.is_match(vendor) {
+                            vendors.insert(vendor.to_string());
+                        }
+                    }
+                }
+
+                vendors.into_iter()
+                    .map(|name| SearchResult {
+                        name,
+                        description: None,
+                        url: None,
+                        abandoned: None,
+                        downloads: None,
+                        favers: None,
+                    })
+                    .collect()
+            }
+            SearchMode::Name => {
+                let package_names = self.get_package_names(None).await;
+
+                let regex_str = query.split_whitespace()
+                    .map(|w| regex::escape(w))
+                    .collect::<Vec<_>>()
+                    .join("|");
+                let regex = match Regex::new(&format!("(?i){}", regex_str)) {
+                    Ok(r) => r,
+                    Err(_) => return Vec::new(),
+                };
+
+                package_names.into_iter()
+                    .filter(|name| regex.is_match(name))
+                    .map(|name| SearchResult {
+                        name,
+                        description: None,
+                        url: None,
+                        abandoned: None,
+                        downloads: None,
+                        favers: None,
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    async fn get_providers(&self, package_name: &str) -> Vec<ProviderInfo> {
+        self.load_root_server_file().await.ok();
+
+        if let Some(ref providers_url) = *self.providers_api_url.read().await {
+            let url = providers_url.replace("%package%", package_name);
+
+            let request = self.client.get(&url);
+            let request = self.apply_auth(request, &url);
+
+            let response = match request.send().await {
+                Ok(r) => r,
+                Err(_) => return Vec::new(),
+            };
+
+            if response.status() == reqwest::StatusCode::NOT_FOUND {
+                return Vec::new();
+            }
+
+            if !response.status().is_success() {
+                return Vec::new();
+            }
+
+            #[derive(Deserialize)]
+            struct ProvidersResponse {
+                providers: Vec<ProviderData>,
+            }
+
+            #[derive(Deserialize)]
+            struct ProviderData {
+                name: String,
+                description: Option<String>,
+                #[serde(rename = "type")]
+                package_type: Option<String>,
+            }
+
+            let data: ProvidersResponse = match response.json().await {
+                Ok(d) => d,
+                Err(_) => return Vec::new(),
+            };
+
+            return data.providers.into_iter()
+                .map(|p| ProviderInfo {
+                    name: p.name,
+                    description: p.description,
+                    package_type: p.package_type.unwrap_or_else(|| "library".to_string()),
+                })
+                .collect();
+        }
+
+        Vec::new()
+    }
+
     async fn load_packages_batch(
         &self,
         packages: &[(String, Option<String>)],
@@ -757,7 +1195,6 @@ impl Repository for ComposerRepository {
             return result;
         }
 
-        // Fetch all packages concurrently
         let fetched: Vec<(String, Option<String>, Vec<Arc<Package>>)> = stream::iter(packages.iter().cloned())
             .map(|(name, constraint)| {
                 let name_clone = name.clone();
@@ -776,7 +1213,6 @@ impl Repository for ComposerRepository {
             .collect()
             .await;
 
-        // Process results and apply constraint filtering
         let parser = VersionParser::new();
         for (name, constraint, pkgs) in fetched {
             if pkgs.is_empty() {
@@ -785,7 +1221,6 @@ impl Repository for ComposerRepository {
 
             result.names_found.push(name);
 
-            // Apply constraint filtering if specified
             let filtered: Vec<Arc<Package>> = if let Some(ref c) = constraint {
                 if c == "*" || c.is_empty() {
                     pkgs
@@ -959,6 +1394,9 @@ struct SearchResultItem {
     downloads: Option<u64>,
     favers: Option<u64>,
     abandoned: Option<Value>,
+    /// Whether this is a virtual package (should be filtered in search results)
+    #[serde(rename = "virtual")]
+    is_virtual: Option<bool>,
 }
 
 #[cfg(test)]
@@ -1291,5 +1729,447 @@ mod tests {
 
         assert!(expanded_b[0].require.as_ref().unwrap().contains_key("vendor/dep-b"));
         assert!(!expanded_b[0].require.as_ref().unwrap().contains_key("vendor/dep-a"));
+    }
+
+    // ============================================================================
+    // Tests for URL canonicalization (matching PHP ComposerRepositoryTest)
+    // ============================================================================
+
+    #[test]
+    fn test_canonicalize_url_absolute_path() {
+        let repo = ComposerRepository::new("test", "https://example.org");
+        assert_eq!(
+            repo.canonicalize_url("/path/to/file"),
+            "https://example.org/path/to/file"
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_url_already_absolute() {
+        let repo = ComposerRepository::new("test", "https://should-not-see-me.test");
+        assert_eq!(
+            repo.canonicalize_url("https://example.org/canonic_url"),
+            "https://example.org/canonic_url"
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_url_file_scheme() {
+        // For file:// URLs, the path comes right after file:// (no host)
+        // When we find "://", after_scheme is "/path/to/repository"
+        // The first "/" is at position 0, so host_part is "file://"
+        // Result is "file://" + "/file" = "file:///file"
+        // This matches PHP behavior for relative paths on file:// URLs
+        let repo = ComposerRepository::new("test", "file:///path/to/repository");
+        assert_eq!(
+            repo.canonicalize_url("/file"),
+            "file:///file"
+        );
+
+        // But absolute URLs are returned unchanged
+        assert_eq!(
+            repo.canonicalize_url("file:///path/to/other/file"),
+            "file:///path/to/other/file"
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_url_with_special_chars() {
+        // URLs can contain sequences resembling pattern references
+        let repo = ComposerRepository::new("test", "https://example.org");
+        assert_eq!(
+            repo.canonicalize_url("/path/to/unusual_$0_filename"),
+            "https://example.org/path/to/unusual_$0_filename"
+        );
+    }
+
+    // ============================================================================
+    // Tests for package name pattern matching
+    // ============================================================================
+
+    #[test]
+    fn test_package_name_to_regex_exact() {
+        let regex = ComposerRepository::package_name_to_regex("vendor/package").unwrap();
+        assert!(regex.is_match("vendor/package"));
+        assert!(!regex.is_match("vendor/package2"));
+        assert!(!regex.is_match("other/package"));
+    }
+
+    #[test]
+    fn test_package_name_to_regex_wildcard_suffix() {
+        let regex = ComposerRepository::package_name_to_regex("vendor/*").unwrap();
+        assert!(regex.is_match("vendor/package"));
+        assert!(regex.is_match("vendor/other-package"));
+        assert!(!regex.is_match("other/package"));
+    }
+
+    #[test]
+    fn test_package_name_to_regex_wildcard_prefix() {
+        let regex = ComposerRepository::package_name_to_regex("*/package").unwrap();
+        assert!(regex.is_match("vendor/package"));
+        assert!(regex.is_match("other/package"));
+        assert!(!regex.is_match("vendor/other"));
+    }
+
+    #[test]
+    fn test_package_name_to_regex_double_wildcard() {
+        let regex = ComposerRepository::package_name_to_regex("symfony/*-bundle").unwrap();
+        assert!(regex.is_match("symfony/framework-bundle"));
+        assert!(regex.is_match("symfony/security-bundle"));
+        assert!(!regex.is_match("symfony/console"));
+    }
+
+    // ============================================================================
+    // Tests for stability filtering
+    // ============================================================================
+
+    #[test]
+    fn test_stability_acceptable_with_global_config() {
+        let mut acceptable = HashMap::new();
+        acceptable.insert(Stability::Stable, 0);
+        acceptable.insert(Stability::RC, 5);
+        let flags = HashMap::new();
+
+        assert!(ComposerRepository::is_stability_acceptable(
+            Stability::Stable,
+            &acceptable,
+            "vendor/package",
+            &flags
+        ));
+        assert!(ComposerRepository::is_stability_acceptable(
+            Stability::RC,
+            &acceptable,
+            "vendor/package",
+            &flags
+        ));
+        assert!(!ComposerRepository::is_stability_acceptable(
+            Stability::Beta,
+            &acceptable,
+            "vendor/package",
+            &flags
+        ));
+        assert!(!ComposerRepository::is_stability_acceptable(
+            Stability::Dev,
+            &acceptable,
+            "vendor/package",
+            &flags
+        ));
+    }
+
+    #[test]
+    fn test_stability_acceptable_with_package_flag() {
+        let mut acceptable = HashMap::new();
+        acceptable.insert(Stability::Stable, 0);
+
+        let mut flags = HashMap::new();
+        flags.insert("vendor/dev-package".to_string(), Stability::Dev);
+
+        // Regular package only accepts stable
+        assert!(ComposerRepository::is_stability_acceptable(
+            Stability::Stable,
+            &acceptable,
+            "vendor/package",
+            &flags
+        ));
+        assert!(!ComposerRepository::is_stability_acceptable(
+            Stability::Dev,
+            &acceptable,
+            "vendor/package",
+            &flags
+        ));
+
+        // Package with dev flag accepts dev
+        assert!(ComposerRepository::is_stability_acceptable(
+            Stability::Dev,
+            &acceptable,
+            "vendor/dev-package",
+            &flags
+        ));
+        assert!(ComposerRepository::is_stability_acceptable(
+            Stability::Stable,
+            &acceptable,
+            "vendor/dev-package",
+            &flags
+        ));
+    }
+
+    #[test]
+    fn test_filter_by_stability() {
+        let mut acceptable = HashMap::new();
+        acceptable.insert(Stability::Stable, 0);
+        acceptable.insert(Stability::RC, 5);
+        let flags = HashMap::new();
+
+        let packages = vec![
+            Arc::new(Package {
+                name: "vendor/stable".to_string(),
+                version: "1.0.0".to_string(),
+                stability: Some(Stability::Stable),
+                ..Default::default()
+            }),
+            Arc::new(Package {
+                name: "vendor/rc".to_string(),
+                version: "1.0.0-RC1".to_string(),
+                stability: Some(Stability::RC),
+                ..Default::default()
+            }),
+            Arc::new(Package {
+                name: "vendor/beta".to_string(),
+                version: "1.0.0-beta1".to_string(),
+                stability: Some(Stability::Beta),
+                ..Default::default()
+            }),
+            Arc::new(Package {
+                name: "vendor/dev".to_string(),
+                version: "dev-master".to_string(),
+                stability: Some(Stability::Dev),
+                ..Default::default()
+            }),
+        ];
+
+        let filtered = ComposerRepository::filter_by_stability(packages, &acceptable, &flags);
+
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].name, "vendor/stable");
+        assert_eq!(filtered[1].name, "vendor/rc");
+    }
+
+    // ============================================================================
+    // Tests for repository URL construction
+    // ============================================================================
+
+    #[test]
+    fn test_new_normalizes_trailing_slash() {
+        let repo = ComposerRepository::new("test", "https://example.org/");
+        assert_eq!(repo.url(), "https://example.org");
+    }
+
+    #[test]
+    fn test_new_extracts_base_url_from_json_path() {
+        let repo = ComposerRepository::new("test", "https://example.org/repo/packages.json");
+        assert_eq!(repo.base_url, "https://example.org/repo");
+    }
+
+    #[test]
+    fn test_packagist_url() {
+        let repo = ComposerRepository::packagist();
+        assert_eq!(repo.url(), "https://repo.packagist.org");
+        assert_eq!(repo.name(), "packagist.org");
+    }
+
+    // ============================================================================
+    // Tests for search result parsing
+    // ============================================================================
+
+    #[test]
+    fn test_search_result_with_abandoned_true() {
+        let json = r#"{
+            "results": [
+                {
+                    "name": "foo/bar",
+                    "description": "A package",
+                    "url": "https://packagist.org/packages/foo/bar",
+                    "downloads": 1000,
+                    "favers": 50,
+                    "abandoned": true
+                }
+            ]
+        }"#;
+
+        let response: SearchResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.results.len(), 1);
+
+        let abandoned = &response.results[0].abandoned;
+        assert!(matches!(abandoned, Some(Value::Bool(true))));
+    }
+
+    #[test]
+    fn test_search_result_with_abandoned_replacement() {
+        let json = r#"{
+            "results": [
+                {
+                    "name": "foo/bar",
+                    "description": "A package",
+                    "abandoned": "new/package"
+                }
+            ]
+        }"#;
+
+        let response: SearchResponse = serde_json::from_str(json).unwrap();
+        let abandoned = &response.results[0].abandoned;
+        assert!(matches!(abandoned, Some(Value::String(s)) if s == "new/package"));
+    }
+
+    #[test]
+    fn test_search_result_with_virtual_package() {
+        let json = r#"{
+            "results": [
+                {
+                    "name": "foo/bar",
+                    "description": "A regular package",
+                    "virtual": false
+                },
+                {
+                    "name": "psr/log-implementation",
+                    "description": "A virtual package",
+                    "virtual": true
+                }
+            ]
+        }"#;
+
+        let response: SearchResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.results.len(), 2);
+        assert_eq!(response.results[0].is_virtual, Some(false));
+        assert_eq!(response.results[1].is_virtual, Some(true));
+    }
+
+    // ============================================================================
+    // Tests for root server file parsing
+    // ============================================================================
+
+    #[test]
+    fn test_parse_root_file_with_metadata_url() {
+        // Simulates parsing a V2 repository root file
+        let json = r#"{
+            "packages": {},
+            "metadata-url": "/p2/%package%.json",
+            "notify-batch": "/downloads/",
+            "search": "/search.json?q=%query%&type=%type%",
+            "list": "/packages/list.json",
+            "providers-api": "/providers/%package%.json",
+            "available-packages": ["vendor/package-a", "vendor/package-b"],
+            "available-package-patterns": ["symfony/*", "doctrine/*"]
+        }"#;
+
+        let data: Value = serde_json::from_str(json).unwrap();
+
+        // Verify metadata-url is present
+        assert_eq!(
+            data.get("metadata-url").and_then(|v| v.as_str()),
+            Some("/p2/%package%.json")
+        );
+
+        // Verify available-packages
+        let available = data.get("available-packages")
+            .and_then(|v| v.as_array())
+            .unwrap();
+        assert_eq!(available.len(), 2);
+
+        // Verify available-package-patterns
+        let patterns = data.get("available-package-patterns")
+            .and_then(|v| v.as_array())
+            .unwrap();
+        assert_eq!(patterns.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_root_file_with_mirrors() {
+        let json = r#"{
+            "packages": {},
+            "metadata-url": "/p2/%package%.json",
+            "mirrors": [
+                {
+                    "dist-url": "https://mirror1.example.org/dist/%package%/%version%/%reference%.%type%",
+                    "preferred": true
+                },
+                {
+                    "dist-url": "https://mirror2.example.org/dist/%package%/%version%/%reference%.%type%",
+                    "preferred": false
+                },
+                {
+                    "git-url": "https://mirror.example.org/git/%package%.git",
+                    "preferred": true
+                }
+            ]
+        }"#;
+
+        let data: Value = serde_json::from_str(json).unwrap();
+        let mirrors = data.get("mirrors").and_then(|v| v.as_array()).unwrap();
+
+        assert_eq!(mirrors.len(), 3);
+
+        // First mirror has dist-url and preferred=true
+        assert!(mirrors[0].get("dist-url").is_some());
+        assert_eq!(mirrors[0].get("preferred").and_then(|v| v.as_bool()), Some(true));
+
+        // Third mirror has git-url
+        assert!(mirrors[2].get("git-url").is_some());
+    }
+
+    // ============================================================================
+    // Tests for cache key generation
+    // ============================================================================
+
+    #[test]
+    fn test_cache_key_simple_package() {
+        let key = ComposerRepository::cache_key("vendor/package");
+        assert_eq!(key, "provider-vendor~package.json");
+    }
+
+    #[test]
+    fn test_cache_key_nested_vendor() {
+        let key = ComposerRepository::cache_key("vendor/sub/package");
+        assert_eq!(key, "provider-vendor~sub~package.json");
+    }
+
+    // ============================================================================
+    // Tests for providers API response parsing
+    // ============================================================================
+
+    #[test]
+    fn test_providers_response_parsing() {
+        #[derive(Deserialize)]
+        struct ProvidersResponse {
+            providers: Vec<ProviderData>,
+        }
+
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct ProviderData {
+            name: String,
+            description: Option<String>,
+            #[serde(rename = "type")]
+            package_type: Option<String>,
+        }
+
+        let json = r#"{
+            "providers": [
+                {
+                    "name": "monolog/monolog",
+                    "description": "Sends your logs to files, sockets, inboxes, databases and various web services",
+                    "type": "library"
+                },
+                {
+                    "name": "symfony/monolog-bundle",
+                    "description": "Symfony MonologBundle",
+                    "type": "symfony-bundle"
+                }
+            ]
+        }"#;
+
+        let response: ProvidersResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.providers.len(), 2);
+        assert_eq!(response.providers[0].name, "monolog/monolog");
+        assert_eq!(response.providers[1].package_type, Some("symfony-bundle".to_string()));
+    }
+
+    // ============================================================================
+    // Tests for dev package name handling
+    // ============================================================================
+
+    #[test]
+    fn test_dev_package_name_suffix() {
+        // The ~dev suffix is used for loading dev versions of packages
+        let name = "vendor/package";
+        let dev_name = format!("{}~dev", name);
+        assert_eq!(dev_name, "vendor/package~dev");
+    }
+
+    #[test]
+    fn test_dev_package_cache_key() {
+        // Dev packages should have their own cache key
+        // The / is replaced with ~ so vendor/package~dev becomes vendor~package~dev
+        let key = ComposerRepository::cache_key("vendor/package~dev");
+        assert_eq!(key, "provider-vendor~package~dev.json");
     }
 }
