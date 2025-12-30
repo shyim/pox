@@ -96,9 +96,19 @@ pub struct UpdateArgs {
     /// Increase verbosity (-v, -vv, -vvv)
     #[arg(short = 'v', long, action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    /// Skip the audit step after update (env: COMPOSER_NO_AUDIT)
+    #[arg(long)]
+    pub no_audit: bool,
+
+    /// Audit output format (table, plain, json, or summary)
+    #[arg(long, default_value = "summary")]
+    pub audit_format: String,
 }
 
 pub async fn execute(args: UpdateArgs) -> Result<i32> {
+    let skip_audit = args.no_audit || std::env::var("COMPOSER_NO_AUDIT").unwrap_or_default() == "1";
+
     // Initialize logger based on verbosity level
     // Only enable verbose logging for phpx crates, not dependencies
     let log_level = match args.verbose {
@@ -180,9 +190,25 @@ pub async fn execute(args: UpdateArgs) -> Result<i32> {
         Some(args.packages.clone())
     };
 
-    installer.update(
+    let result = installer.update(
         args.optimize_autoloader,
         args.lock,
         update_packages,
-    ).await
+    ).await;
+
+    if result.is_ok() && !skip_audit {
+        let audit_args = crate::pm::audit::AuditArgs {
+            no_dev: args.no_dev,
+            format: args.audit_format.clone(),
+            locked: false,
+            abandoned: Some("report".to_string()),
+            working_dir: working_dir.clone(),
+        };
+
+        if let Err(e) = crate::pm::audit::execute(audit_args).await {
+            eprintln!("Warning: Audit failed: {}", e);
+        }
+    }
+
+    result
 }

@@ -1,9 +1,16 @@
+use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 use walkdir::WalkDir;
+
+fn sanitize_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new("[^a-z0-9._]").unwrap())
+}
 
 /// Filesystem cache for composer data
 ///
@@ -18,8 +25,6 @@ pub struct Cache {
     enabled: bool,
     /// Whether the cache is read-only
     read_only: bool,
-    /// Characters allowed in cache keys (used for sanitization)
-    allowlist: String,
 }
 
 impl Cache {
@@ -40,21 +45,6 @@ impl Cache {
             root,
             enabled: true,
             read_only: false,
-            allowlist: "a-z0-9._".to_string(),
-        }
-    }
-
-    /// Create a new cache with custom allowlist
-    ///
-    /// # Arguments
-    /// * `root` - Root directory for cache storage
-    /// * `allowlist` - Characters allowed in cache keys (regex character class)
-    pub fn with_allowlist(root: PathBuf, allowlist: String) -> Self {
-        Self {
-            root,
-            enabled: true,
-            read_only: false,
-            allowlist,
         }
     }
 
@@ -128,12 +118,9 @@ impl Cache {
     }
 
     /// Sanitize a cache key to ensure it's safe for filesystem use
-    ///
-    /// Replaces characters not in the allowlist with dashes
+    #[inline]
     fn sanitize_key(&self, key: &str) -> String {
-        let pattern = format!("[^{}]", self.allowlist);
-        let re = regex::Regex::new(&pattern).unwrap();
-        re.replace_all(key, "-").to_string()
+        sanitize_regex().replace_all(key, "-").into_owned()
     }
 
     /// Get the full path for a cache key
@@ -147,12 +134,10 @@ impl Cache {
     /// # Arguments
     /// * `key` - Cache key to check
     pub fn has(&self, key: &str) -> bool {
-        if !self.is_enabled() {
+        if !self.enabled {
             return false;
         }
-
-        let path = self.get_path(key);
-        path.exists() && path.is_file()
+        self.get_path(key).is_file()
     }
 
     /// Read data from cache
@@ -165,50 +150,34 @@ impl Cache {
     /// * `Ok(None)` - Cache is disabled or key doesn't exist
     /// * `Err(e)` - IO error occurred
     pub fn read(&self, key: &str) -> io::Result<Option<Vec<u8>>> {
-        if !self.is_enabled() {
+        if !self.enabled {
             return Ok(None);
         }
 
-        let path = self.get_path(key);
-        if !path.exists() {
-            return Ok(None);
+        match fs::read(self.get_path(key)) {
+            Ok(data) => Ok(Some(data)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
         }
-
-        let data = fs::read(&path)?;
-        Ok(Some(data))
     }
 
     /// Write data to cache
-    ///
-    /// Uses atomic write (write to temp file, then rename) to ensure consistency
     ///
     /// # Arguments
     /// * `key` - Cache key to write
     /// * `data` - Data to write
     pub fn write(&self, key: &str, data: &[u8]) -> io::Result<()> {
-        if !self.is_enabled() || self.read_only {
+        if !self.enabled || self.read_only {
             return Ok(());
         }
 
         let path = self.get_path(key);
 
-        // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        // Write to temporary file first (atomic write)
-        let temp_path = path.with_extension("tmp");
-        {
-            let mut file = File::create(&temp_path)?;
-            file.write_all(data)?;
-            file.sync_all()?;
-        }
-
-        // Rename to final location (atomic on most filesystems)
-        fs::rename(&temp_path, &path)?;
-
-        Ok(())
+        fs::write(&path, data)
     }
 
     /// Copy a file from cache to destination
@@ -222,25 +191,21 @@ impl Cache {
     /// * `Ok(false)` - Cache is disabled or key doesn't exist
     /// * `Err(e)` - IO error occurred
     pub fn copy_to(&self, key: &str, dest: &Path) -> io::Result<bool> {
-        if !self.is_enabled() {
+        if !self.enabled {
             return Ok(false);
         }
 
         let path = self.get_path(key);
-        if !path.exists() {
-            return Ok(false);
-        }
 
-        // Update access time to help with LRU eviction
-        let _ = self.touch(&path);
-
-        // Ensure destination directory exists
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        fs::copy(&path, dest)?;
-        Ok(true)
+        match fs::copy(&path, dest) {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     /// Copy a file to cache
@@ -249,20 +214,12 @@ impl Cache {
     /// * `key` - Cache key to store under
     /// * `source` - Source file path
     pub fn copy_from(&self, key: &str, source: &Path) -> io::Result<()> {
-        if !self.is_enabled() || self.read_only {
+        if !self.enabled || self.read_only {
             return Ok(());
-        }
-
-        if !source.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Source file does not exist: {}", source.display()),
-            ));
         }
 
         let path = self.get_path(key);
 
-        // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -276,27 +233,25 @@ impl Cache {
     /// # Arguments
     /// * `key` - Cache key to delete
     pub fn remove(&self, key: &str) -> io::Result<()> {
-        if !self.is_enabled() || self.read_only {
+        if !self.enabled || self.read_only {
             return Ok(());
         }
 
-        let path = self.get_path(key);
-        if path.exists() {
-            fs::remove_file(&path)?;
+        match fs::remove_file(self.get_path(key)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
         }
-
-        Ok(())
     }
 
     /// Clear the entire cache
     ///
     /// Removes all files and directories under the cache root
     pub fn clear(&self) -> io::Result<()> {
-        if !self.is_enabled() || self.read_only {
+        if !self.enabled || self.read_only {
             return Ok(());
         }
 
-        // Remove all contents but keep the root directory
         for entry in fs::read_dir(&self.root)? {
             let entry = entry?;
             let path = entry.path();
@@ -321,7 +276,7 @@ impl Cache {
     /// # Returns
     /// Number of bytes freed
     pub fn gc(&self, ttl: Duration) -> io::Result<u64> {
-        if !self.is_enabled() || self.read_only {
+        if !self.enabled || self.read_only {
             return Ok(0);
         }
 
@@ -369,7 +324,7 @@ impl Cache {
     /// # Returns
     /// Number of bytes freed
     pub fn gc_vcs(&self, ttl: Duration) -> io::Result<u64> {
-        if !self.is_enabled() || self.read_only {
+        if !self.enabled || self.read_only {
             return Ok(0);
         }
 
@@ -416,16 +371,15 @@ impl Cache {
     /// * `Ok(None)` - Cache is disabled or file doesn't exist
     /// * `Err(e)` - IO error occurred
     pub fn sha256(&self, key: &str) -> io::Result<Option<String>> {
-        if !self.is_enabled() {
+        if !self.enabled {
             return Ok(None);
         }
 
-        let path = self.get_path(key);
-        if !path.exists() {
-            return Ok(None);
-        }
-
-        let mut file = File::open(&path)?;
+        let mut file = match File::open(self.get_path(key)) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
         let mut hasher = Sha256::new();
         let mut buffer = [0u8; 8192];
 
@@ -446,10 +400,9 @@ impl Cache {
     /// # Returns
     /// Total size in bytes
     pub fn size(&self) -> io::Result<u64> {
-        if !self.is_enabled() {
+        if !self.enabled {
             return Ok(0);
         }
-
         self.dir_size(&self.root)
     }
 
@@ -461,34 +414,18 @@ impl Cache {
     /// # Returns
     /// Age in seconds, or None if file doesn't exist
     pub fn age(&self, key: &str) -> io::Result<Option<Duration>> {
-        if !self.is_enabled() {
+        if !self.enabled {
             return Ok(None);
         }
 
-        let path = self.get_path(key);
-        if !path.exists() {
-            return Ok(None);
-        }
+        let metadata = match fs::metadata(self.get_path(key)) {
+            Ok(m) => m,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
 
-        let metadata = fs::metadata(&path)?;
         let modified = metadata.modified()?;
-        let now = SystemTime::now();
-
-        match now.duration_since(modified) {
-            Ok(duration) => Ok(Some(duration)),
-            Err(_) => Ok(None),
-        }
-    }
-
-    /// Touch a file to update its access time
-    fn touch(&self, path: &Path) -> io::Result<()> {
-        // On Unix systems, we can use filetime crate, but for simplicity
-        // we'll just try to update metadata using a platform-independent approach
-
-        // Try to open and close the file to update access time
-        let _ = File::open(path)?;
-
-        Ok(())
+        Ok(SystemTime::now().duration_since(modified).ok())
     }
 
     /// Calculate the total size of a directory

@@ -50,7 +50,7 @@ impl RepoCache {
         let cache_path = cache_dir.join("repo").join(sanitized);
 
         Self {
-            cache: Cache::with_allowlist(cache_path, "a-z0-9.$~_".to_string()),
+            cache: Cache::new(cache_path),
         }
     }
 
