@@ -14,6 +14,7 @@ pub mod audit;
 mod licenses;
 mod home;
 mod suggests;
+mod fund;
 
 use clap::Subcommand;
 use anyhow::Result;
@@ -31,6 +32,7 @@ pub use audit::AuditArgs;
 pub use licenses::LicensesArgs;
 pub use home::HomeArgs;
 pub use suggests::SuggestsArgs;
+pub use fund::FundArgs;
 
 // Re-export args for pm subcommand aliases
 pub use crate::install::InstallArgs;
@@ -76,6 +78,9 @@ pub enum PmCommands {
     /// Shows information about licenses of dependencies
     Licenses(LicensesArgs),
 
+    /// Discover how to help fund the maintenance of your dependencies
+    Fund(FundArgs),
+
     /// Opens the package's repository URL or homepage in your browser
     #[command(alias = "home")]
     Browse(HomeArgs),
@@ -114,6 +119,7 @@ pub async fn execute(command: PmCommands) -> Result<i32> {
         PmCommands::Outdated(args) => outdated::execute(args).await,
         PmCommands::Audit(args) => audit::execute(args).await,
         PmCommands::Licenses(args) => licenses::execute(args).await,
+        PmCommands::Fund(args) => fund::execute(args).await,
         PmCommands::Browse(args) => home::execute(args).await,
         PmCommands::Suggests(args) => suggests::execute(args).await,
         PmCommands::Install(args) => crate::install::execute(args).await,
