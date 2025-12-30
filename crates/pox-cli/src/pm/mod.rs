@@ -12,6 +12,7 @@ mod search;
 mod outdated;
 pub mod audit;
 mod licenses;
+mod home;
 
 use clap::Subcommand;
 use anyhow::Result;
@@ -27,6 +28,7 @@ pub use search::SearchArgs;
 pub use outdated::OutdatedArgs;
 pub use audit::AuditArgs;
 pub use licenses::LicensesArgs;
+pub use home::HomeArgs;
 
 // Re-export args for pm subcommand aliases
 pub use crate::install::InstallArgs;
@@ -72,6 +74,10 @@ pub enum PmCommands {
     /// Shows information about licenses of dependencies
     Licenses(LicensesArgs),
 
+    /// Opens the package's repository URL or homepage in your browser
+    #[command(alias = "home")]
+    Browse(HomeArgs),
+
     /// Install project dependencies from composer.lock (alias for top-level install)
     #[command(alias = "i")]
     Install(InstallArgs),
@@ -102,6 +108,7 @@ pub async fn execute(command: PmCommands) -> Result<i32> {
         PmCommands::Outdated(args) => outdated::execute(args).await,
         PmCommands::Audit(args) => audit::execute(args).await,
         PmCommands::Licenses(args) => licenses::execute(args).await,
+        PmCommands::Browse(args) => home::execute(args).await,
         PmCommands::Install(args) => crate::install::execute(args).await,
         PmCommands::Update(args) => crate::update::execute(args).await,
         PmCommands::Add(args) => crate::add::execute(args).await,
