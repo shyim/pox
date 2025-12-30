@@ -1,0 +1,19 @@
+[package]
+name = "pox-semver"
+description = "Semantic versioning library compatible with Composer/semver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme = "README.md"
+
+[dependencies]
+regex = "1"
+lazy_static = "1"
+thiserror = "2"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "semver"
+harness = false

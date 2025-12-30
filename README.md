@@ -1,8 +1,8 @@
-# PHPx
+# Pox
 
 ## This is TOTALLY WIP and experimental
 
-PHPx (temporary name) is an idea to build a all-in-one single binary PHP distribution, which contains all PHP extensions, a Webserver, Package Manager, Formatter/Linter for best development experience working with PHP.
+Pox (temporary name) is an idea to build a all-in-one single binary PHP distribution, which contains all PHP extensions, a Webserver, Package Manager, Formatter/Linter for best development experience working with PHP.
 
 Ideas:
 
@@ -15,7 +15,7 @@ Ideas:
 
 ### General
 
-- [X] A `phpx.toml` file to configure PHP settings like `memory_limit` or other things
+- [X] A `pox.toml` file to configure PHP settings like `memory_limit` or other things
 
 ### Web Server
 
@@ -38,11 +38,11 @@ Ideas:
 ## The CLI
 
 ```
-phpx 0.1.0 - PHP 8.5.1 embedded in Rust
+pox 0.1.0 - PHP 8.5.1 embedded in Rust
 
-Usage: phpx [options] [-f] <file> [--] [args...]
-       phpx [options] -r <code> [--] [args...]
-       phpx server [options] [router.php]
+Usage: pox [options] [-f] <file> [--] [args...]
+       pox [options] -r <code> [--] [args...]
+       pox server [options] [router.php]
 
 Options:
   -d key[=value]  Define INI entry
@@ -63,12 +63,12 @@ Subcommands:
   server          Start a PHP development server
   pm              Other package manager commands (show, validate, etc.)
 
-Run 'phpx --help' for more options.
+Run 'pox --help' for more options.
 ```
 
-## Configuration (phpx.toml)
+## Configuration (pox.toml)
 
-PHPx supports a local `phpx.toml` configuration file in your project directory. This file allows you to configure PHP runtime settings and development server options.
+Pox supports a local `pox.toml` configuration file in your project directory. This file allows you to configure PHP runtime settings and development server options.
 
 ### Example Configuration
 
@@ -114,16 +114,16 @@ Any PHP INI setting can be specified here as key-value pairs. These settings are
 Settings are merged with the following priority (highest to lowest):
 
 1. CLI arguments (e.g., `-d memory_limit=512M`)
-2. `phpx.toml` configuration file
+2. `pox.toml` configuration file
 3. Built-in defaults
 
 ### PM Commands
 
 ```
-❯ phpx pm
+❯ pox pm
 Package manager commands (show, validate, dump-autoload)
 
-Usage: phpx pm <COMMAND>
+Usage: pox pm <COMMAND>
 
 Commands:
   audit          Check for security vulnerabilities in installed packages

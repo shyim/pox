@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: namespace-profile-phpx
+    runs-on: namespace-profile-pox
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

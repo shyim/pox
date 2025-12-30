@@ -1759,108 +1759,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
-name = "phpx-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "atty",
- "clap",
- "colored",
- "console",
- "dialoguer",
- "env_logger",
- "globset",
- "indexmap",
- "indicatif",
- "log",
- "notify",
- "notify-debouncer-full",
- "phpx-embed",
- "phpx-pm",
- "phpx-semver",
- "phpx-spdx",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "terminal_size",
- "tiny_http",
- "tokio",
- "toml",
- "urlencoding",
-]
-
-[[package]]
-name = "phpx-embed"
-version = "0.1.0"
-dependencies = [
- "cc",
- "tempfile",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "phpx-pm"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bzip2",
- "chrono",
- "clap",
- "console",
- "directories",
- "flate2",
- "futures-util",
- "git2",
- "glob",
- "indexmap",
- "indicatif",
- "log",
- "md-5",
- "pathdiff",
- "phpx-semver",
- "phpx-spdx",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "sha1",
- "sha2",
- "shellexpand",
- "tar",
- "tempfile",
- "thiserror 2.0.17",
- "tokio",
- "tokio-test",
- "url",
- "urlencoding",
- "walkdir",
- "xz2",
- "zip",
-]
-
-[[package]]
-name = "phpx-semver"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "lazy_static",
- "regex",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "phpx-spdx"
-version = "0.1.0"
-dependencies = [
- "lazy_static",
- "regex",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "pin-project-lite"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1935,6 +1833,108 @@ name = "powerfmt"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
+
+[[package]]
+name = "pox-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "atty",
+ "clap",
+ "colored",
+ "console",
+ "dialoguer",
+ "env_logger",
+ "globset",
+ "indexmap",
+ "indicatif",
+ "log",
+ "notify",
+ "notify-debouncer-full",
+ "pox-embed",
+ "pox-pm",
+ "pox-semver",
+ "pox-spdx",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "terminal_size",
+ "tiny_http",
+ "tokio",
+ "toml",
+ "urlencoding",
+]
+
+[[package]]
+name = "pox-embed"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "tempfile",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "pox-pm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bzip2",
+ "chrono",
+ "clap",
+ "console",
+ "directories",
+ "flate2",
+ "futures-util",
+ "git2",
+ "glob",
+ "indexmap",
+ "indicatif",
+ "log",
+ "md-5",
+ "pathdiff",
+ "pox-semver",
+ "pox-spdx",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "shellexpand",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
+ "url",
+ "urlencoding",
+ "walkdir",
+ "xz2",
+ "zip",
+]
+
+[[package]]
+name = "pox-semver"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "lazy_static",
+ "regex",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "pox-spdx"
+version = "0.1.0"
+dependencies = [
+ "lazy_static",
+ "regex",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "proc-macro2"
