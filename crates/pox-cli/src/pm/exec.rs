@@ -43,7 +43,7 @@ pub async fn execute(args: ExecArgs) -> Result<i32> {
     } else {
         if binaries.is_empty() {
             if !vendor_bin.exists() {
-                println!("{} No vendor/bin directory found. Run 'phpx install' first.",
+                println!("{} No vendor/bin directory found. Run 'pox install' first.",
                     style("Info:").cyan()
                 );
             } else {
@@ -89,7 +89,7 @@ pub async fn execute(args: ExecArgs) -> Result<i32> {
                 }
             } else {
                 eprintln!();
-                eprintln!("No binaries found. Run 'phpx install' first.");
+                eprintln!("No binaries found. Run 'pox install' first.");
             }
 
             Ok(1)
@@ -188,7 +188,7 @@ fn find_binary(vendor_bin: &PathBuf, name: &str) -> Result<Option<PathBuf>> {
 fn list_binaries(binaries: &[String], vendor_bin: &PathBuf) -> Result<i32> {
     if binaries.is_empty() {
         if !vendor_bin.exists() {
-            println!("{} No vendor/bin directory found. Run 'phpx install' first.",
+            println!("{} No vendor/bin directory found. Run 'pox install' first.",
                 style("Info:").cyan()
             );
         } else {
@@ -208,7 +208,7 @@ fn list_binaries(binaries: &[String], vendor_bin: &PathBuf) -> Result<i32> {
     println!();
     println!("{} Run with: {} <binary> [args...]",
         style("Usage:").dim(),
-        style("phpx pm exec").cyan()
+        style("pox pm exec").cyan()
     );
 
     Ok(0)
@@ -219,10 +219,10 @@ fn execute_binary(path: &PathBuf, args: &[String], working_dir: &PathBuf) -> Res
     let is_php_script = is_php_file(path)?;
 
     let status = if is_php_script {
-        let phpx_binary = std::env::current_exe()
+        let pox_binary = std::env::current_exe()
             .context("Failed to get current executable path")?;
 
-        Command::new(&phpx_binary)
+        Command::new(&pox_binary)
             .arg(path)
             .args(args)
             .current_dir(working_dir)

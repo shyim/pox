@@ -65,7 +65,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::config::{AuthConfig, AuthMatch};
 
-const DEFAULT_USER_AGENT: &str = "Composer/2.0 (phpx-pm)";
+const DEFAULT_USER_AGENT: &str = "Composer/2.0 (pox-pm)";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_MAX_RETRIES: u32 = 3;

@@ -149,7 +149,7 @@ impl ComposerRepository {
             packages: RwLock::new(HashMap::new()),
             loading_locks: RwLock::new(HashMap::new()),
             client: reqwest::Client::builder()
-                .user_agent("phpx-composer/0.1.0")
+                .user_agent("pox-composer/0.1.0")
                 .build()
                 .unwrap_or_default(),
             file_cache: None,

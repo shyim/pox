@@ -6,7 +6,7 @@ mod install;
 mod remove;
 mod update;
 
-use config::PhpxConfig;
+use config::PoxConfig;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -22,7 +22,7 @@ use notify_debouncer_full::{new_debouncer, DebouncedEvent};
 use globset::{Glob, GlobSetBuilder};
 
 #[derive(Parser, Debug)]
-#[command(name = "phpx")]
+#[command(name = "pox")]
 #[command(about = "PHP CLI embedded in Rust")]
 #[command(disable_version_flag = true)]
 #[command(after_help = "See 'php --help' for the original PHP CLI help.")]
@@ -127,7 +127,7 @@ fn print_version() {
 
 /// Build INI entries by merging config file and CLI arguments
 /// CLI arguments take precedence over config file settings
-fn build_ini_entries(config: Option<&PhpxConfig>, defines: &[String]) -> Option<String> {
+fn build_ini_entries(config: Option<&PoxConfig>, defines: &[String]) -> Option<String> {
     use std::collections::HashMap;
 
     let mut ini_map: HashMap<String, String> = HashMap::new();
@@ -162,7 +162,7 @@ fn build_ini_entries(config: Option<&PhpxConfig>, defines: &[String]) -> Option<
     Some(entries.join("\n") + "\n")
 }
 
-fn run_server(host: &str, port: u16, document_root: &Path, router: Option<&Path>, worker: Option<&Path>, num_workers: usize, watch_patterns: Vec<String>, config: Option<&PhpxConfig>) -> Result<i32> {
+fn run_server(host: &str, port: u16, document_root: &Path, router: Option<&Path>, worker: Option<&Path>, num_workers: usize, watch_patterns: Vec<String>, config: Option<&PoxConfig>) -> Result<i32> {
     // Apply INI entries from config for server mode
     let ini_entries = build_ini_entries(config, &[]);
     if ini_entries.is_some() {
@@ -590,8 +590,8 @@ fn guess_content_type(path: &Path) -> String {
 fn run() -> Result<i32> {
     let args = Args::parse();
 
-    // Load phpx.toml config if present
-    let config = PhpxConfig::load_from_cwd()?;
+    // Load pox.toml config if present
+    let config = PoxConfig::load_from_cwd()?;
 
     // Handle subcommands first
     if let Some(command) = args.command {
@@ -742,11 +742,11 @@ fn run() -> Result<i32> {
 
     // No action specified - show usage
     let v = Php::version();
-    eprintln!("phpx {} - PHP {} embedded in Rust", env!("CARGO_PKG_VERSION"), v.version);
+    eprintln!("pox {} - PHP {} embedded in Rust", env!("CARGO_PKG_VERSION"), v.version);
     eprintln!();
-    eprintln!("Usage: phpx [options] [-f] <file> [--] [args...]");
-    eprintln!("       phpx [options] -r <code> [--] [args...]");
-    eprintln!("       phpx server [options] [router.php]");
+    eprintln!("Usage: pox [options] [-f] <file> [--] [args...]");
+    eprintln!("       pox [options] -r <code> [--] [args...]");
+    eprintln!("       pox server [options] [router.php]");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  -d key[=value]  Define INI entry");
@@ -767,7 +767,7 @@ fn run() -> Result<i32> {
     eprintln!("  server          Start a PHP development server");
     eprintln!("  pm              Other package manager commands (dump-autoload, exec, etc.)");
     eprintln!();
-    eprintln!("Run 'phpx --help' for more options.");
+    eprintln!("Run 'pox --help' for more options.");
 
     Ok(0)
 }

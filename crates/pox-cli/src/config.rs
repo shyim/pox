@@ -3,10 +3,10 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// The main phpx configuration file structure (phpx.toml)
+/// The main pox configuration file structure (pox.toml)
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-pub struct PhpxConfig {
+pub struct PoxConfig {
     /// PHP runtime configuration
     pub php: PhpConfig,
 
@@ -64,17 +64,17 @@ impl Default for ServerConfig {
     }
 }
 
-impl PhpxConfig {
-    /// Load configuration from phpx.toml, searching upward from the given directory
+impl PoxConfig {
+    /// Load configuration from pox.toml, searching upward from the given directory
     pub fn load(start_dir: &Path) -> Result<Option<Self>> {
         let mut current = start_dir.to_path_buf();
 
         loop {
-            let config_path = current.join("phpx.toml");
+            let config_path = current.join("pox.toml");
 
             if config_path.exists() {
                 let content = std::fs::read_to_string(&config_path)?;
-                let config: PhpxConfig = toml::from_str(&content)?;
+                let config: PoxConfig = toml::from_str(&content)?;
                 return Ok(Some(config));
             }
 
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn test_parse_empty_config() {
-        let config: PhpxConfig = toml::from_str("").unwrap();
+        let config: PoxConfig = toml::from_str("").unwrap();
         assert!(config.php.ini.is_empty());
     }
 
@@ -111,7 +111,7 @@ memory_limit = "256M"
 max_execution_time = "30"
 display_errors = "On"
 "#;
-        let config: PhpxConfig = toml::from_str(toml).unwrap();
+        let config: PoxConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.php.ini.get("memory_limit"), Some(&"256M".to_string()));
         assert_eq!(config.php.ini.get("max_execution_time"), Some(&"30".to_string()));
         assert_eq!(config.php.ini.get("display_errors"), Some(&"On".to_string()));
@@ -129,7 +129,7 @@ worker = "worker.php"
 workers = 4
 watch = ["**/*.php", "config/**/*"]
 "#;
-        let config: PhpxConfig = toml::from_str(toml).unwrap();
+        let config: PoxConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.server.host, Some("0.0.0.0".to_string()));
         assert_eq!(config.server.port, Some(9000));
         assert_eq!(config.server.document_root, Some("public".to_string()));

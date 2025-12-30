@@ -110,7 +110,7 @@ pub async fn execute(args: UpdateArgs) -> Result<i32> {
     let skip_audit = args.no_audit || std::env::var("COMPOSER_NO_AUDIT").unwrap_or_default() == "1";
 
     // Initialize logger based on verbosity level
-    // Only enable verbose logging for phpx crates, not dependencies
+    // Only enable verbose logging for pox crates, not dependencies
     let log_level = match args.verbose {
         0 => log::LevelFilter::Warn,
         1 => log::LevelFilter::Info,
@@ -120,7 +120,7 @@ pub async fn execute(args: UpdateArgs) -> Result<i32> {
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Warn)
         .filter_module("pox_pm", log_level)
-        .filter_module("phpx_cli", log_level)
+        .filter_module("pox_cli", log_level)
         .format_timestamp(None)
         .format_target(false)
         .init();

@@ -437,7 +437,7 @@ fn output_summary(response: &SecurityAdvisoriesResponse) -> Result<()> {
             "Found {} security vulnerability advisor{} affecting {} package{}.",
             total_advisories, plurality, affected_packages, pkg_plurality
         );
-        eprintln!("Run \"phpx pm audit\" for a full list of advisories.");
+        eprintln!("Run \"pox pm audit\" for a full list of advisories.");
     } else {
         eprintln!("No security vulnerability advisories found.");
     }

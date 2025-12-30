@@ -78,7 +78,7 @@ impl GitLabDriver {
         // Add required headers
         request = request
             .header("Accept", "application/json")
-            .header("User-Agent", "phpx-composer");
+            .header("User-Agent", "pox-composer");
 
         let response = request.send()
             .map_err(|e: reqwest::Error| VcsDriverError::Network(e.to_string()))?;

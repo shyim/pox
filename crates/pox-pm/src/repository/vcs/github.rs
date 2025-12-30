@@ -70,7 +70,7 @@ impl GitHubDriver {
         // Add required headers
         request = request
             .header("Accept", "application/vnd.github.v3+json")
-            .header("User-Agent", "phpx-composer");
+            .header("User-Agent", "pox-composer");
 
         let response = request.send()
             .map_err(|e: reqwest::Error| VcsDriverError::Network(e.to_string()))?;

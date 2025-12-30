@@ -1,5 +1,5 @@
 /*
- * phpx - PHP CLI embedded in Rust
+ * pox - PHP CLI embedded in Rust
  *
  * This file provides the C interface to PHP's embed SAPI.
  * Inspired by FrankenPHP's approach to embedding PHP.
@@ -127,7 +127,7 @@ static void pox_apply_ini_entries(void) {
 /* Internal initialization helper */
 static int pox_init(int argc, char **argv) {
     php_embed_module.name = "cli";
-    php_embed_module.pretty_name = "PHP CLI embedded in phpx";
+    php_embed_module.pretty_name = "PHP CLI embedded";
     php_embed_module.register_server_variables = pox_register_variables;
     php_embed_module.phpinfo_as_text = 1;  /* Output phpinfo as plain text, not HTML */
 
@@ -460,7 +460,7 @@ char *pox_get_loaded_extensions(int argc, char **argv) {
 }
 
 /*
- * Free a string allocated by phpx functions.
+ * Free a string allocated by pox functions.
  */
 void pox_free_string(char *str) {
     if (str != NULL) {
@@ -702,7 +702,7 @@ static void pox_web_register_variables(zval *track_vars_array) {
     snprintf(remote_port_str, sizeof(remote_port_str), "%d", current_request->remote_port);
     php_register_variable_safe("REMOTE_PORT", remote_port_str, strlen(remote_port_str), track_vars_array);
 
-    php_register_variable_safe("SERVER_SOFTWARE", "phpx", 4, track_vars_array);
+    php_register_variable_safe("SERVER_SOFTWARE", "pox", 4, track_vars_array);
     php_register_variable_safe("SERVER_PROTOCOL", "HTTP/1.1", 8, track_vars_array);
     php_register_variable_safe("GATEWAY_INTERFACE", "CGI/1.1", 7, track_vars_array);
 
@@ -772,8 +772,8 @@ static int pox_web_startup(sapi_module_struct *sapi_module) {
 
 /* Custom SAPI module for web requests */
 static sapi_module_struct pox_web_sapi_module = {
-    "phpx",                         /* name */
-    "phpx Web Server",              /* pretty name */
+    "pox",                         /* name */
+    "pox Web Server",              /* pretty name */
 
     pox_web_startup,               /* startup */
     php_module_shutdown_wrapper,    /* shutdown */
@@ -1096,7 +1096,7 @@ PHP_FUNCTION(pox_handle_request) {
     RETURN_TRUE;
 }
 
-/* Module entry for the phpx extension */
+/* Module entry for the pox extension */
 static const zend_function_entry pox_functions[] = {
     PHP_FE(pox_handle_request, arginfo_pox_handle_request)
     PHP_FE_END
@@ -1104,7 +1104,7 @@ static const zend_function_entry pox_functions[] = {
 
 static zend_module_entry pox_module_entry = {
     STANDARD_MODULE_HEADER,
-    "phpx",
+    "pox",
     pox_functions,
     NULL, /* MINIT */
     NULL, /* MSHUTDOWN */
@@ -1125,8 +1125,8 @@ static int pox_worker_startup(sapi_module_struct *sapi_module) {
 
 /* Worker SAPI module - similar to web SAPI but for workers */
 static sapi_module_struct pox_worker_sapi_module = {
-    "phpx-worker",                  /* name */
-    "phpx Worker Mode",             /* pretty name */
+    "pox-worker",                  /* name */
+    "pox Worker Mode",             /* pretty name */
 
     pox_worker_startup,            /* startup - register our extension */
     php_module_shutdown_wrapper,    /* shutdown */

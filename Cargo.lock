@@ -1836,7 +1836,7 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
 name = "pox-cli"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "atty",
@@ -1868,7 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "pox-embed"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "cc",
  "tempfile",
@@ -1877,7 +1877,7 @@ dependencies = [
 
 [[package]]
 name = "pox-pm"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1918,7 +1918,7 @@ dependencies = [
 
 [[package]]
 name = "pox-semver"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "criterion",
  "lazy_static",
@@ -1928,7 +1928,7 @@ dependencies = [
 
 [[package]]
 name = "pox-spdx"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "lazy_static",
  "regex",

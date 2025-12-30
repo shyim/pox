@@ -1,4 +1,4 @@
-//! Integration tests for phpx-embed crate
+//! Integration tests for pox-embed crate
 //!
 //! Note: These tests must be run sequentially (not in parallel) because
 //! PHP can only be initialized once per process. Use:

@@ -43,7 +43,7 @@
 //! PHP_CONFIG=/opt/php-static/bin/php-config cargo build --release
 //!
 //! # Or force static linking via environment variable
-//! PHPX_STATIC=1 PHP_CONFIG=/path/to/php-config cargo build --release
+//! POX_STATIC=1 PHP_CONFIG=/path/to/php-config cargo build --release
 //!
 //! # Or use the cargo feature
 //! PHP_CONFIG=/path/to/php-config cargo build --release --features static

@@ -78,7 +78,7 @@ impl BitbucketDriver {
         // Add required headers
         request = request
             .header("Accept", "application/json")
-            .header("User-Agent", "phpx-composer");
+            .header("User-Agent", "pox-composer");
 
         let response = request.send()
             .map_err(|e: reqwest::Error| VcsDriverError::Network(e.to_string()))?;
@@ -119,7 +119,7 @@ impl BitbucketDriver {
             request = request.basic_auth(username, Some(password));
         }
 
-        request = request.header("User-Agent", "phpx-composer");
+        request = request.header("User-Agent", "pox-composer");
 
         let response = request.send()
             .map_err(|e: reqwest::Error| VcsDriverError::Network(e.to_string()))?;
@@ -177,7 +177,7 @@ impl VcsDriver for BitbucketDriver {
 
             request = request
                 .header("Accept", "application/json")
-                .header("User-Agent", "phpx-composer");
+                .header("User-Agent", "pox-composer");
 
             let response: serde_json::Value = request.send()
                 .map_err(|e: reqwest::Error| VcsDriverError::Network(e.to_string()))?
@@ -229,7 +229,7 @@ impl VcsDriver for BitbucketDriver {
 
             request = request
                 .header("Accept", "application/json")
-                .header("User-Agent", "phpx-composer");
+                .header("User-Agent", "pox-composer");
 
             let response: serde_json::Value = request.send()
                 .map_err(|e: reqwest::Error| VcsDriverError::Network(e.to_string()))?

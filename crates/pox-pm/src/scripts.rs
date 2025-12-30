@@ -220,11 +220,11 @@ pub fn run_command(
         return execute_shell_command(&full_cmd, working_dir, ctx);
     }
 
-    // Handle @composer - execute composer command via phpx
+    // Handle @composer - execute composer command via pox
     if let Some(composer_cmd) = cmd.strip_prefix("@composer ") {
-        let phpx_binary = std::env::current_exe()
+        let pox_binary = std::env::current_exe()
             .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "phpx".to_string());
+            .unwrap_or_else(|_| "pox".to_string());
 
         // Check if this is a "bin" command - route to "pm bin"
         let adjusted_cmd = if composer_cmd.starts_with("bin ") {
@@ -234,9 +234,9 @@ pub fn run_command(
         };
 
         let full_cmd = if extra_args.is_empty() {
-            format!("{} {}", phpx_binary, adjusted_cmd)
+            format!("{} {}", pox_binary, adjusted_cmd)
         } else {
-            format!("{} {} {}", phpx_binary, adjusted_cmd, extra_args.join(" "))
+            format!("{} {} {}", pox_binary, adjusted_cmd, extra_args.join(" "))
         };
 
         return execute_shell_command(&full_cmd, working_dir, ctx);

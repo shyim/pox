@@ -262,7 +262,7 @@ impl ComposerBuilder {
             vendor_dir: self.working_dir.join(&config.vendor_dir),
             bin_dir: self.working_dir.join(&config.bin_dir),
             cache_dir: config.cache_dir.clone()
-                .unwrap_or_else(|| self.working_dir.join(".phpx/cache")),
+                .unwrap_or_else(|| self.working_dir.join(".pox/cache")),
             prefer_source,
             prefer_dist,
             dry_run: self.dry_run,

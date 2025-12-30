@@ -124,7 +124,7 @@ pub async fn execute(args: WhyArgs, inverted: bool) -> Result<i32> {
     if matched_package.is_some() && inverted {
         if let Some(pkg) = matched_package {
             println!(
-                "Package \"{}\" {} is already installed! To find out why, run `phpx pm why {}`",
+                "Package \"{}\" {} is already installed! To find out why, run `pox pm why {}`",
                 needle,
                 pkg.pretty_version.as_deref().unwrap_or(&pkg.version),
                 needle
@@ -193,7 +193,7 @@ pub async fn execute(args: WhyArgs, inverted: bool) -> Result<i32> {
         }
 
         eprintln!(
-            "\nNot finding what you were looking for? Try calling `phpx {} \"{}:{}\" --dry-run` to get another view on the problem.",
+            "\nNot finding what you were looking for? Try calling `pox {} \"{}:{}\" --dry-run` to get another view on the problem.",
             command, needle, constraint_str
         );
     }

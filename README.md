@@ -1,143 +1,215 @@
-# Pox
+<p align="center">
+  <img src=".github/logo.png" alt="PHPox Logo" width="200">
+</p>
 
-## This is TOTALLY WIP and experimental
+<h1 align="center">PHPox</h1>
 
-Pox (temporary name) is an idea to build a all-in-one single binary PHP distribution, which contains all PHP extensions, a Webserver, Package Manager, Formatter/Linter for best development experience working with PHP.
+<p align="center">
+  <strong>An all-in-one PHP distribution for modern development</strong>
+</p>
 
-Ideas:
+<p align="center">
+  A single binary that includes PHP runtime, web server, package manager, and all common extensions.<br>
+  No more juggling multiple tools or fighting with PHP installations.
+</p>
 
-- Production Ready Webserver
-- Package Manager that is equal to Composer
-- Formatter/Linter that uses Mago
-- A builtin test runner?
+---
 
-## Current Status
+## Features
 
-### General
+- **Single Binary** — One download, everything included. No dependencies, no setup.
+- **Integrated Web Server** — Development server with worker mode (like FrankenPHP) and file watching.
+- **Composer-Compatible Package Manager** — Fast, native package management that works with existing `composer.json` files.
+- **All Extensions Included** — Common extensions pre-compiled and ready to use.
+- **Project Configuration** — Simple `pox.toml` file for PHP settings and server config.
 
-- [X] A `pox.toml` file to configure PHP settings like `memory_limit` or other things
+## Quick Start
 
-### Web Server
+```bash
+# Run a PHP script
+pox script.php
 
-- [X] Regular Webserver
-- [X] Worker Mode similar to FrankenPHP
-- [_] Production Ready
+# Start development server
+pox server
 
-### Package Manager
+# Install dependencies (reads composer.json)
+pox install
 
-- [X] Install Packages
-- [X] Update Packages
-- [X] Remove Packages
-- [X] Audit Packages
-- [_] Composer Plugins
+# Add a package
+pox add vendor/package
+```
 
-### Formatter/Linter
+## Installation
 
-- [_] Formatter/Linter that uses Mago
+### Download Binary
 
-## The CLI
+[Each pipeline run includes as artifact a prebuilt binary for your platform.]()
+
+### Build from Source
+
+```bash
+git clone https://github.com/shyim/pox
+cd pox
+cargo build --release
+```
+
+Requires a PHP installation compiled with embed SAPI (`--enable-embed`). Set `PHP_CONFIG` environment variable to point to your PHP installation.
+
+## CLI Reference
 
 ```
-pox 0.1.0 - PHP 8.5.1 embedded in Rust
+pox 0.1.0 - PHP embedded in Rust
 
-Usage: pox [options] [-f] <file> [--] [args...]
-       pox [options] -r <code> [--] [args...]
-       pox server [options] [router.php]
+Usage: pox [options] <file> [args...]
+       pox [options] -r <code> [args...]
+       pox <command> [options]
 
 Options:
   -d key[=value]  Define INI entry
-  -i              PHP information (phpinfo)
-  -l              Syntax check only (lint)
-  -m              Show compiled in modules
-  -r <code>       Run PHP <code> without script tags
-  -v              Version information
-  -h, --help      Show this help message
+  -i              Show PHP info
+  -l              Syntax check (lint)
+  -m              Show compiled modules
+  -r <code>       Run PHP code
+  -v              Version info
+  -h, --help      Show help
 
-Subcommands:
-  init            Create a new composer.json in current directory
-  install         Install project dependencies from composer.lock
-  update          Update dependencies to their latest versions
-  add             Add a package to the project
-  remove          Remove a package from the project
-  run             Run a script defined in composer.json
-  server          Start a PHP development server
-  pm              Other package manager commands (show, validate, etc.)
-
-Run 'pox --help' for more options.
+Commands:
+  server          Start development server
+  init            Create new composer.json
+  install, i      Install dependencies
+  update          Update dependencies
+  add, require    Add a package
+  remove, rm      Remove a package
+  run             Run composer script
+  pm              Package manager commands
 ```
 
-## Configuration (pox.toml)
+### Package Manager Commands
 
-Pox supports a local `pox.toml` configuration file in your project directory. This file allows you to configure PHP runtime settings and development server options.
+```bash
+pox pm show              # Show package info
+pox pm search <query>    # Search Packagist
+pox pm outdated          # List outdated packages
+pox pm audit             # Security vulnerability check
+pox pm why <package>     # Show why package is installed
+pox pm dump-autoload     # Regenerate autoloader
+pox pm exec <binary>     # Run vendored binary
+pox pm clear-cache       # Clear package cache
+```
 
-### Example Configuration
+## Configuration
+
+Create a `pox.toml` in your project root:
 
 ```toml
-# PHP runtime configuration
+# PHP runtime settings
 [php.ini]
 memory_limit = "256M"
-max_execution_time = "30"
 display_errors = "On"
 error_reporting = "E_ALL"
 
-# Development server configuration
+# Development server
 [server]
 host = "0.0.0.0"
 port = 8080
 document_root = "public"
 router = "index.php"
-# worker = "worker.php"  # Optional: Enable worker mode
-# workers = 4            # Number of worker threads
-# watch = ["**/*.php"]   # File patterns to watch for auto-reload
+
+# Worker mode (optional)
+# worker = "worker.php"
+# workers = 4
+# watch = ["**/*.php"]
 ```
-
-### Configuration Options
-
-#### `[php.ini]`
-
-Any PHP INI setting can be specified here as key-value pairs. These settings are applied when PHP is initialized. CLI arguments (`-d`) take precedence over config file settings.
-
-#### `[server]`
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `host` | string | Address to bind to (default: "127.0.0.1") |
-| `port` | number | Port to listen on (default: 8000) |
-| `document_root` | string | Document root directory (default: ".") |
-| `router` | string | Router script path (optional) |
-| `worker` | string | Worker script for long-running mode (optional) |
-| `workers` | number | Number of worker threads (default: CPU cores) |
-| `watch` | array | Glob patterns for file watching (optional) |
 
 ### Configuration Priority
 
-Settings are merged with the following priority (highest to lowest):
-
-1. CLI arguments (e.g., `-d memory_limit=512M`)
-2. `pox.toml` configuration file
+1. CLI arguments (`-d memory_limit=512M`)
+2. `pox.toml` settings
 3. Built-in defaults
 
-### PM Commands
+## Web Server
 
+### Standard Mode
+
+```bash
+pox server
+pox server --port 8080 --document-root public
+pox server public/index.php  # With router script
 ```
-❯ pox pm
-Package manager commands (show, validate, dump-autoload)
 
-Usage: pox pm <COMMAND>
+### Worker Mode
 
-Commands:
-  audit          Check for security vulnerabilities in installed packages
-  bump           Bump version constraints in composer.json to locked versions
-  exec           Execute a vendored binary/script
-  search         Search for packages on Packagist
-  show           Show information about packages
-  validate       Validate composer.json and composer.lock
-  dump-autoload  Regenerate the autoloader
-  why            Show why a package is installed
-  outdated       Show outdated packages
-  clear-cache    Clear the Composer cache
-  help           Print this message or the help of the given subcommand(s)
+Long-running PHP processes for better performance (similar to FrankenPHP):
 
-Options:
-  -h, --help  Print help
+```bash
+pox server --worker worker.php --workers 4
 ```
+
+### File Watching
+
+Auto-restart workers when files change:
+
+```bash
+pox server --worker worker.php --watch "**/*.php"
+```
+
+## Package Manager
+
+PHPox includes a Composer-compatible package manager written in Rust. It reads and writes standard `composer.json` and `composer.lock` files.
+
+```bash
+# Initialize new project
+pox init
+
+# Install from lock file
+pox install
+
+# Update dependencies
+pox update
+
+# Add packages
+pox add laravel/framework
+pox add --dev phpunit/phpunit
+
+# Remove packages
+pox remove vendor/package
+```
+
+### Supported Features
+
+- Full dependency resolution (SAT solver)
+- PSR-0, PSR-4, classmap, and files autoloading
+- Private repositories and authentication
+- Platform requirements checking
+- Lock file compatibility with Composer
+
+## Architecture
+
+PHPox is built as a Rust workspace with these crates:
+
+| Crate | Description |
+|-------|-------------|
+| `pox-cli` | Main CLI binary, web server, command handling |
+| `pox-embed` | FFI bindings to PHP's embed SAPI |
+| `pox-pm` | Package manager (solver, repositories, autoload) |
+| `pox-semver` | Semantic versioning for Composer constraints |
+| `pox-spdx` | SPDX license identifier validation |
+
+## Contributing
+
+Contributions welcome! See the [Feature Roadmap](crates/pox-pm/FEATURE_GAPS_ISSUES.md) for planned features.
+
+```bash
+# Build
+cargo build
+
+# Run tests
+cargo test
+
+# Run specific crate tests
+cargo test -p pox-pm
+```
+
+## License
+
+MIT

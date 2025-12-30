@@ -159,7 +159,7 @@ async fn execute_in_namespace(
     run_in_namespace(&namespace_dir, namespace, command_args, config)
 }
 
-/// Run phpx pm command in a namespace directory
+/// Run pox pm command in a namespace directory
 fn run_in_namespace(
     namespace_dir: &PathBuf,
     namespace_name: &str,
@@ -172,7 +172,7 @@ fn run_in_namespace(
     );
 
     if command_args.is_empty() {
-        println!("{} No command specified. Usage: phpx pm bin {} <command>",
+        println!("{} No command specified. Usage: pox pm bin {} <command>",
             style("Error:").red().bold(),
             namespace_name
         );
@@ -183,7 +183,7 @@ fn run_in_namespace(
     let current_exe = std::env::current_exe()
         .context("Failed to get current executable path")?;
 
-    // Build the command: phpx <command> -d <namespace_dir>
+    // Build the command: pox <command> -d <namespace_dir>
     // The first arg is the composer command (install, update, require, etc.)
     let composer_command = &command_args[0];
     let rest_args = &command_args[1..];

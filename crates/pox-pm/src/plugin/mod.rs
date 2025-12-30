@@ -1,7 +1,7 @@
 //! Plugin system for ported Composer plugins.
 //!
 //! This module provides native Rust implementations of popular Composer plugins.
-//! Since phpx cannot execute PHP-based Composer plugins, these are manually
+//! Since pox cannot execute PHP-based Composer plugins, these are manually
 //! ported and registered as event listeners.
 //!
 //! Each plugin implements `EventListener` directly and checks if its
