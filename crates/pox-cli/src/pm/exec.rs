@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use clap::Args;
 use console::style;
 use dialoguer::{theme::ColorfulTheme, Select};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -54,7 +55,7 @@ pub async fn execute(args: ExecArgs) -> Result<i32> {
             return Ok(0);
         }
 
-        if !atty::is(atty::Stream::Stdout) {
+        if !std::io::stdout().is_terminal() {
             return list_binaries(&binaries, &vendor_bin);
         }
 

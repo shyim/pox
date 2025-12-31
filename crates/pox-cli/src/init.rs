@@ -6,6 +6,7 @@ use console::style;
 use dialoguer::{Confirm, Input};
 use regex::Regex;
 use pox_spdx::SpdxLicenses;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -285,7 +286,7 @@ pub async fn execute(args: InitArgs) -> Result<i32> {
     }
 
     let git_config = GitConfig::load();
-    let is_interactive = !args.no_interaction && atty::is(atty::Stream::Stdin);
+    let is_interactive = !args.no_interaction && std::io::stdin().is_terminal();
 
     println!(
         "\n{}",
