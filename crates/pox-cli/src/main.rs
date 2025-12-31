@@ -10,7 +10,8 @@ mod update;
 use config::PoxConfig;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, CommandFactory};
+use clap_complete::{generate, Shell};
 use pox_embed::{HttpRequest, Php, PhpWeb, PhpWorker};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -120,6 +121,13 @@ enum Commands {
 
     /// Run a script defined in composer.json
     Run(pm::RunArgs),
+
+    /// Generate shell completion scripts
+    Completion {
+        /// The shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }
 
 fn print_version() {
@@ -693,6 +701,11 @@ fn run() -> Result<i32> {
                     .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
                 return rt.block_on(pm::run::execute(run_args));
             }
+            Commands::Completion { shell } => {
+                let mut cmd = Args::command();
+                generate(shell, &mut cmd, "pox", &mut std::io::stdout());
+                return Ok(0);
+            }
         }
     }
 
@@ -775,6 +788,7 @@ fn run() -> Result<i32> {
     eprintln!("  run             Run a script defined in composer.json");
     eprintln!("  server          Start a PHP development server");
     eprintln!("  pm              Other package manager commands (dump-autoload, exec, etc.)");
+    eprintln!("  completion      Generate shell completion scripts");
     eprintln!();
     eprintln!("Run 'pox --help' for more options.");
 
