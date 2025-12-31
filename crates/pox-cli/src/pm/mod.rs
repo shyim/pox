@@ -16,6 +16,7 @@ mod licenses;
 mod home;
 mod suggests;
 mod fund;
+mod reinstall;
 
 use clap::Subcommand;
 use anyhow::Result;
@@ -35,6 +36,7 @@ pub use licenses::LicensesArgs;
 pub use home::HomeArgs;
 pub use suggests::SuggestsArgs;
 pub use fund::FundArgs;
+pub use reinstall::ReinstallArgs;
 
 // Re-export args for pm subcommand aliases
 pub use crate::install::InstallArgs;
@@ -94,6 +96,9 @@ pub enum PmCommands {
     #[command(alias = "suggest")]
     Suggests(SuggestsArgs),
 
+    /// Uninstall and reinstall packages
+    Reinstall(ReinstallArgs),
+
     /// Install project dependencies from composer.lock (alias for top-level install)
     #[command(alias = "i")]
     Install(InstallArgs),
@@ -128,6 +133,7 @@ pub async fn execute(command: PmCommands) -> Result<i32> {
         PmCommands::Fund(args) => fund::execute(args).await,
         PmCommands::Browse(args) => home::execute(args).await,
         PmCommands::Suggests(args) => suggests::execute(args).await,
+        PmCommands::Reinstall(args) => reinstall::execute(args).await,
         PmCommands::Install(args) => crate::install::execute(args).await,
         PmCommands::Update(args) => crate::update::execute(args).await,
         PmCommands::Add(args) => crate::add::execute(args).await,
