@@ -10,6 +10,7 @@ mod link;
 mod package;
 mod root_version;
 mod source;
+pub mod version_bumper;
 
 pub use alias::{
     parse_branch_aliases, parse_inline_alias, AliasPackage, DEFAULT_BRANCH_ALIAS,
