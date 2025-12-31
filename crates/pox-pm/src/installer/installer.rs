@@ -390,7 +390,7 @@ impl Installer {
             .collect();
 
         let lock = ComposerLock {
-            content_hash: compute_content_hash(composer_json),
+            content_hash: crate::util::compute_content_hash(&serde_json::to_string(composer_json).unwrap_or_default()),
             packages: prod_packages.iter().map(|p| LockedPackage::from(*p)).collect(),
             packages_dev: dev_packages.iter().map(|p| LockedPackage::from(*p)).collect(),
             minimum_stability: composer_json.minimum_stability.clone().unwrap_or_else(|| "stable".to_string()),
@@ -863,65 +863,6 @@ fn find_transitive_dependencies(packages: &[Package], roots: &HashSet<String>) -
         }
     }
     result
-}
-
-/// Computes the content-hash for the lock file.
-///
-/// This matches Composer's algorithm:
-/// 1. Extract relevant keys from composer.json
-/// 2. Sort keys alphabetically
-/// 3. JSON encode (compact, no pretty print)
-/// 4. MD5 hash
-fn compute_content_hash(composer_json: &crate::json::ComposerJson) -> String {
-    use md5::Md5;
-    use md5::Digest;
-    use serde_json::Value;
-
-    let json_value = match serde_json::to_value(composer_json) {
-        Ok(v) => v,
-        Err(_) => return "0".repeat(32),
-    };
-
-    let mut relevant_keys = vec![
-        "name", "version", "require", "require-dev", "conflict",
-        "replace", "provide", "minimum-stability", "prefer-stable",
-        "repositories", "extra"
-    ];
-    relevant_keys.sort();
-
-    let mut relevant_map = serde_json::Map::new();
-
-    if let Some(obj) = json_value.as_object() {
-        for key in &relevant_keys {
-            if let Some(value) = obj.get(*key) {
-                relevant_map.insert(key.to_string(), value.clone());
-            }
-        }
-    }
-
-    if let Some(config) = json_value.get("config") {
-        if let Some(platform) = config.get("platform") {
-            if let Some(obj) = platform.as_object() {
-                if !obj.is_empty() {
-                    let mut config_obj = serde_json::Map::new();
-                    config_obj.insert("platform".to_string(), platform.clone());
-                    relevant_map.insert("config".to_string(), Value::Object(config_obj));
-                }
-            }
-        }
-    }
-
-    let json_output = match serde_json::to_string(&Value::Object(relevant_map)) {
-        Ok(s) => s,
-        Err(_) => return "0".repeat(32),
-    };
-
-    let json_with_escaped_slashes = json_output.replace("/", "\\/");
-
-    let mut hasher = Md5::new();
-    hasher.update(json_with_escaped_slashes.as_bytes());
-    let result = hasher.finalize();
-    format!("{:x}", result)
 }
 
 fn locked_package_to_autoload(lp: &LockedPackage, is_dev: bool, aliases_map: &HashMap<String, Vec<String>>) -> PackageAutoload {

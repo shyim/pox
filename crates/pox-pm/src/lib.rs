@@ -25,12 +25,12 @@ pub use downloader::{DownloadManager, DownloadResult};
 pub use installer::{InstallationManager, InstallConfig};
 pub use autoload::{AutoloadGenerator, AutoloadConfig};
 pub use plugin::{register_plugins, BinConfig};
-pub use composer::{Composer, ComposerBuilder, compute_content_hash};
+pub use composer::{Composer, ComposerBuilder};
 pub use dependency_graph::{get_dependents, find_packages_with_replacers_and_providers, DependencyResult};
 pub use event::{
     ComposerEvent, EventDispatcher, EventListener, EventType,
     PostAutoloadDumpEvent, PostInstallEvent, PostUpdateEvent,
     PreAutoloadDumpEvent, PreInstallEvent, PreUpdateEvent,
 };
-pub use util::is_platform_package;
+pub use util::{is_platform_package, compute_content_hash};
 #[cfg(test)] mod test_content_hash;

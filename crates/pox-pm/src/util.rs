@@ -1,5 +1,65 @@
 //! Utility functions for the package manager.
 
+use md5::{Md5, Digest};
+use serde_json::Value;
+
+/// Compute the content hash for a composer.json file.
+/// This matches Composer's algorithm:
+/// 1. Parse the JSON
+/// 2. Extract relevant keys (name, version, require, etc.)
+/// 3. Sort keys alphabetically
+/// 4. JSON encode (compact, no pretty print)
+/// 5. MD5 hash
+pub fn compute_content_hash(json_content: &str) -> String {
+    let json_value: Value = match serde_json::from_str(json_content) {
+        Ok(v) => v,
+        Err(_) => return "0".repeat(32),
+    };
+
+    let mut relevant_keys = vec![
+        "name", "version", "require", "require-dev", "conflict",
+        "replace", "provide", "minimum-stability", "prefer-stable",
+        "repositories", "extra"
+    ];
+    relevant_keys.sort();
+
+    let mut relevant_map = serde_json::Map::new();
+
+    if let Some(obj) = json_value.as_object() {
+        for key in &relevant_keys {
+            if let Some(value) = obj.get(*key) {
+                relevant_map.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+
+    // Include config.platform if present
+    if let Some(config) = json_value.get("config") {
+        if let Some(platform) = config.get("platform") {
+            if let Some(obj) = platform.as_object() {
+                if !obj.is_empty() {
+                    let mut config_obj = serde_json::Map::new();
+                    config_obj.insert("platform".to_string(), platform.clone());
+                    relevant_map.insert("config".to_string(), Value::Object(config_obj));
+                }
+            }
+        }
+    }
+
+    let json_output = match serde_json::to_string(&Value::Object(relevant_map)) {
+        Ok(s) => s,
+        Err(_) => return "0".repeat(32),
+    };
+
+    // Composer escapes forward slashes in JSON
+    let json_with_escaped_slashes = json_output.replace('/', "\\/");
+
+    let mut hasher = Md5::new();
+    hasher.update(json_with_escaped_slashes.as_bytes());
+    let result = hasher.finalize();
+    format!("{:x}", result)
+}
+
 /// Check if a package name represents a platform package.
 ///
 /// Platform packages are virtual packages that represent the PHP runtime
