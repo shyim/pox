@@ -16,6 +16,7 @@ pox-pm = { path = "../pox-pm" }
 pox-semver = { path = "../pox-semver" }
 pox-spdx = { path = "../pox-spdx" }
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 anyhow = "1"
 tiny_http = "0.12"
 tokio = { version = "1", features = ["full"] }
