@@ -9,6 +9,11 @@ use std::time::{Duration, Instant};
 
 use crate::json::ComposerJson;
 
+/// Auto-scripts execution context for Symfony Flex
+struct AutoScriptsContext<'a> {
+    composer_json: &'a ComposerJson,
+}
+
 /// Default process timeout in seconds (same as Composer)
 const DEFAULT_PROCESS_TIMEOUT: u64 = 300;
 
@@ -113,13 +118,14 @@ pub fn run_event_script(
     }
 
     let mut ctx = ScriptContext::new();
+    let auto_ctx = AutoScriptsContext { composer_json };
 
     for cmd in commands {
         if !quiet {
             println!("{} {}", style(">").green(), style(cmd).dim());
         }
 
-        let exit_code = run_command(cmd, working_dir, &[], &scripts, &mut ctx)?;
+        let exit_code = run_command_with_composer(cmd, working_dir, &[], &scripts, &mut ctx, Some(&auto_ctx))?;
 
         if exit_code != 0 {
             eprintln!("{} Script '{}' returned exit code {}",
@@ -163,11 +169,12 @@ pub fn run_script(
     );
 
     let mut ctx = ScriptContext::new();
+    let auto_ctx = AutoScriptsContext { composer_json };
 
     for cmd in commands {
         println!("{} {}", style(">").green(), style(cmd).dim());
 
-        let exit_code = run_command(cmd, working_dir, args, &scripts, &mut ctx)?;
+        let exit_code = run_command_with_composer(cmd, working_dir, args, &scripts, &mut ctx, Some(&auto_ctx))?;
 
         if exit_code != 0 {
             eprintln!("{} Script '{}' returned exit code {}",
@@ -189,6 +196,18 @@ pub fn run_command(
     extra_args: &[String],
     scripts: &HashMap<&str, Vec<String>>,
     ctx: &mut ScriptContext,
+) -> Result<i32> {
+    run_command_with_composer(cmd, working_dir, extra_args, scripts, ctx, None)
+}
+
+/// Run a single command with optional composer.json context for auto-scripts
+fn run_command_with_composer(
+    cmd: &str,
+    working_dir: &Path,
+    extra_args: &[String],
+    scripts: &HashMap<&str, Vec<String>>,
+    ctx: &mut ScriptContext,
+    auto_ctx: Option<&AutoScriptsContext>,
 ) -> Result<i32> {
     // Handle @putenv - set environment variable
     if let Some(env_assignment) = cmd.strip_prefix("@putenv ") {
@@ -244,12 +263,25 @@ pub fn run_command(
 
     // Handle @script-name - reference to another script
     if let Some(script_ref) = cmd.strip_prefix('@') {
+        // Special handling for @auto-scripts (Symfony Flex feature)
+        if script_ref == "auto-scripts" {
+            if let Some(auto_ctx) = auto_ctx {
+                return run_auto_scripts(working_dir, auto_ctx.composer_json, ctx);
+            } else {
+                // No composer.json context available - this shouldn't happen in normal usage
+                eprintln!("{} Referenced script 'auto-scripts' not found",
+                    style("Warning:").yellow()
+                );
+                return Ok(1);
+            }
+        }
+
         // Check if this references another script
         if let Some(ref_commands) = scripts.get(script_ref) {
             println!("{} Running referenced script: {}", style(">").green(), style(script_ref).cyan());
             for ref_cmd in ref_commands {
                 println!("{} {}", style(">").green(), style(ref_cmd).dim());
-                let exit_code = run_command(ref_cmd, working_dir, extra_args, scripts, ctx)?;
+                let exit_code = run_command_with_composer(ref_cmd, working_dir, extra_args, scripts, ctx, auto_ctx)?;
                 if exit_code != 0 {
                     return Ok(exit_code);
                 }
@@ -353,6 +385,82 @@ fn execute_shell_command(cmd: &str, working_dir: &Path, ctx: &ScriptContext) -> 
             }
         }
     }
+}
+
+/// Run Symfony Flex auto-scripts from extra.symfony.auto-scripts
+fn run_auto_scripts(
+    working_dir: &Path,
+    composer_json: &ComposerJson,
+    ctx: &mut ScriptContext,
+) -> Result<i32> {
+    // Get auto-scripts from extra.symfony.auto-scripts
+    let auto_scripts = composer_json
+        .extra
+        .get("symfony")
+        .and_then(|s| s.get("auto-scripts"))
+        .and_then(|a| a.as_object());
+
+    let Some(auto_scripts) = auto_scripts else {
+        // No auto-scripts defined, that's fine
+        return Ok(0);
+    };
+
+    if auto_scripts.is_empty() {
+        return Ok(0);
+    }
+
+    println!(
+        "{} Executing auto-scripts ({} script(s))",
+        style(">").green().bold(),
+        auto_scripts.len()
+    );
+
+    for (script_cmd, script_type) in auto_scripts {
+        let script_type = script_type.as_str().unwrap_or("script");
+
+        println!("{} {}", style(">").green(), style(script_cmd).dim());
+
+        let exit_code = match script_type {
+            "php-script" => {
+                // Run as PHP script
+                let php_binary = std::env::var("PHP_BINARY")
+                    .or_else(|_| std::env::var("_"))
+                    .unwrap_or_else(|_| "php".to_string());
+                let full_cmd = format!("{} {}", php_binary, script_cmd);
+                execute_shell_command(&full_cmd, working_dir, ctx)?
+            }
+            "symfony-cmd" => {
+                // Run as Symfony console command
+                let console_path = working_dir.join("bin").join("console");
+                let console = if console_path.exists() {
+                    console_path.to_string_lossy().to_string()
+                } else {
+                    "bin/console".to_string()
+                };
+                let php_binary = std::env::var("PHP_BINARY")
+                    .or_else(|_| std::env::var("_"))
+                    .unwrap_or_else(|_| "php".to_string());
+                let full_cmd = format!("{} {} {}", php_binary, console, script_cmd);
+                execute_shell_command(&full_cmd, working_dir, ctx)?
+            }
+            _ => {
+                // Default: run as shell script
+                execute_shell_command(script_cmd, working_dir, ctx)?
+            }
+        };
+
+        if exit_code != 0 {
+            eprintln!(
+                "{} Auto-script '{}' returned exit code {}",
+                style("Error:").red().bold(),
+                script_cmd,
+                exit_code
+            );
+            return Ok(exit_code);
+        }
+    }
+
+    Ok(0)
 }
 
 /// List available scripts
