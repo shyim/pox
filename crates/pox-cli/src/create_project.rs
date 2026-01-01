@@ -161,9 +161,7 @@ fn find_best_version(
         .collect();
 
     candidates.sort_by(|a, b| {
-        let v_a = a.pretty_version.as_deref().unwrap_or(&a.version);
-        let v_b = b.pretty_version.as_deref().unwrap_or(&b.version);
-        compare_versions(v_b, v_a)
+        compare_versions(&b.version, &a.version)
     });
 
     candidates.into_iter().next()
@@ -537,5 +535,20 @@ mod tests {
         let best = find_best_version(&packages, None, "dev");
         assert!(best.is_some());
         // dev-main should be considered as the "latest"
+    }
+
+    #[test]
+    fn test_find_best_version_uses_normalized_version() {
+        let mut v8 = Package::new("symfony/skeleton", "8.0.99.0");
+        v8.pretty_version = Some("v8.0.99".to_string());
+
+        let mut v7 = Package::new("symfony/skeleton", "7.4.99.0");
+        v7.pretty_version = Some("v7.4.99".to_string());
+
+        let packages = vec![Arc::new(v7), Arc::new(v8)];
+
+        let best = find_best_version(&packages, None, "stable");
+        assert!(best.is_some());
+        assert_eq!(best.unwrap().version, "8.0.99.0");
     }
 }
