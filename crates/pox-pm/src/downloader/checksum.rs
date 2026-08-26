@@ -46,27 +46,27 @@ pub async fn verify_checksum(
             use sha1::{Sha1, Digest as Sha1Digest};
             let mut hasher = Sha1::new();
             hasher.update(&buffer);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         }
         ChecksumType::Sha256 => {
             let mut hasher = Sha256::new();
             hasher.update(&buffer);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         }
         ChecksumType::Sha384 => {
             let mut hasher = Sha384::new();
             hasher.update(&buffer);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         }
         ChecksumType::Sha512 => {
             let mut hasher = Sha512::new();
             hasher.update(&buffer);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         }
         ChecksumType::Md5 => {
             let mut hasher = Md5::new();
             hasher.update(&buffer);
-            format!("{:x}", hasher.finalize())
+            hex::encode(hasher.finalize())
         }
     };
 
@@ -82,7 +82,7 @@ pub async fn compute_sha256(path: &Path) -> Result<String> {
 
     let mut hasher = Sha256::new();
     hasher.update(&buffer);
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// Compute SHA-1 checksum of a file
@@ -96,7 +96,7 @@ pub async fn compute_sha1(path: &Path) -> Result<String> {
 
     let mut hasher = Sha1::new();
     hasher.update(&buffer);
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 #[cfg(test)]

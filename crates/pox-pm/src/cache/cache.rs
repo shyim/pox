@@ -392,7 +392,7 @@ impl Cache {
         }
 
         let result = hasher.finalize();
-        Ok(Some(format!("{:x}", result)))
+        Ok(Some(hex::encode(result)))
     }
 
     /// Get the total size of the cache

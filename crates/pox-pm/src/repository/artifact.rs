@@ -318,7 +318,7 @@ fn calculate_sha1(path: &Path) -> std::io::Result<String> {
         hasher.update(&buffer[..bytes_read]);
     }
 
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// Parse license from JSON value

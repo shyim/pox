@@ -21,7 +21,7 @@ mod tests {
         let mut hasher = Md5::new();
         hasher.update(escaped.as_bytes());
         let result = hasher.finalize();
-        let hash = format!("{:x}", result);
+        let hash = hex::encode(result);
 
         // Expected from PHP: 952f760ba9cfb2ca4a799c52d42099d4
         assert_eq!(hash, "952f760ba9cfb2ca4a799c52d42099d4");

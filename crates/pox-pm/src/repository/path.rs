@@ -248,7 +248,7 @@ impl PathRepository {
                 let mut hasher = Sha1::new();
                 hasher.update(content.as_bytes());
                 hasher.update(format!("{:?}", self.options).as_bytes());
-                Some(format!("{:x}", hasher.finalize()))
+                Some(hex::encode(hasher.finalize()))
             }
             "auto" | _ => {
                 // Try git commit hash first
@@ -259,7 +259,7 @@ impl PathRepository {
                 let mut hasher = Sha1::new();
                 hasher.update(content.as_bytes());
                 hasher.update(format!("{:?}", self.options).as_bytes());
-                Some(format!("{:x}", hasher.finalize()))
+                Some(hex::encode(hasher.finalize()))
             }
         }
     }

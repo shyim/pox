@@ -57,7 +57,7 @@ pub fn compute_content_hash(json_content: &str) -> String {
     let mut hasher = Md5::new();
     hasher.update(json_with_escaped_slashes.as_bytes());
     let result = hasher.finalize();
-    format!("{:x}", result)
+    hex::encode(result)
 }
 
 /// Check if a package name represents a platform package.
