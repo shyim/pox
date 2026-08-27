@@ -19,7 +19,7 @@
 
 - **Single Binary** — One download, everything included. No dependencies, no setup.
 - **Integrated Web Server** — Development server with worker mode (like FrankenPHP) and file watching.
-- **Composer-Compatible Package Manager** — Fast, native package management that works with existing `composer.json` files.
+- **Riff Package Manager** — Composer-compatible package management powered by [Riff](https://github.com/shyim/riff).
 - **All Extensions Included** — Common extensions pre-compiled and ready to use.
 - **Project Configuration** — Simple `pox.toml` file for PHP settings and server config.
 
@@ -76,12 +76,15 @@ Options:
 Commands:
   server          Start development server
   init            Create new composer.json
-  install, i      Install dependencies
+  install         Install dependencies
   update          Update dependencies
-  add, require    Add a package
-  remove, rm      Remove a package
+  require, add    Add a package
+  remove          Remove a package
   run             Run composer script
-  pm              Package manager commands
+  pm              Compatibility prefix for package manager commands
+  validate        Validate composer.json and composer.lock
+  status          Show locally modified dependencies
+  completion      Generate shell completion scripts
 ```
 
 ### Package Manager Commands
@@ -155,7 +158,7 @@ pox server --worker worker.php --watch "**/*.php"
 
 ## Package Manager
 
-PHPox includes a Composer-compatible package manager written in Rust. It reads and writes standard `composer.json` and `composer.lock` files.
+PHPox embeds [Riff](https://github.com/shyim/riff), a Composer-compatible package manager written in Rust. It reads and writes standard `composer.json` and `composer.lock` files without requiring a separate Composer installation.
 
 ```bash
 # Initialize new project
@@ -173,7 +176,22 @@ pox add --dev phpunit/phpunit
 
 # Remove packages
 pox remove vendor/package
+
+# Use the wider Riff command surface
+pox validate --strict
+pox check-platform-reqs --lock
+pox audit --locked
 ```
+
+Riff commands are available directly and through the compatibility prefix, so
+`pox show` and `pox pm show` are equivalent. Run `pox <command> --help` for the
+complete arguments supported by a command.
+
+Package resolution uses facts supplied by Pox's embedded PHP runtime. Composer
+scripts using `@php` and `@composer` are routed back through the current `pox`
+binary, preserving the single-binary workflow. An explicit Riff `--php` option
+overrides only the executable used by child scripts; it does not change the
+platform used for dependency resolution.
 
 ### Supported Features
 
@@ -182,6 +200,13 @@ pox remove vendor/package
 - Private repositories and authentication
 - Platform requirements checking
 - Lock file compatibility with Composer
+- Native package patches and supported Composer plugin adapters
+- Symfony Flex recipes and dependency policies
+
+Riff cannot execute arbitrary Composer PHP plugins inside its Rust process.
+Unsupported enabled plugins fail with an actionable error; see Riff's
+[compatibility guide](https://github.com/shyim/riff/blob/main/docs/compatibility.md)
+before replacing Composer in an existing deployment workflow.
 
 ## Architecture
 
@@ -191,13 +216,13 @@ PHPox is built as a Rust workspace with these crates:
 |-------|-------------|
 | `pox-cli` | Main CLI binary, web server, command handling |
 | `pox-embed` | FFI bindings to PHP's embed SAPI |
-| `pox-pm` | Package manager (solver, repositories, autoload) |
-| `pox-semver` | Semantic versioning for Composer constraints |
-| `pox-spdx` | SPDX license identifier validation |
+| `riff` / `riff-core` | Composer-compatible package management, fetched from GitHub at a pinned revision |
 
 ## Contributing
 
-Contributions welcome! See the [Feature Roadmap](crates/pox-pm/FEATURE_GAPS_ISSUES.md) for planned features.
+Contributions welcome. Package-manager behavior is implemented upstream in
+[Riff](https://github.com/shyim/riff); Pox owns the embedded platform bridge,
+command routing, PHP runtime, and server integration.
 
 ```bash
 # Build
@@ -206,9 +231,13 @@ cargo build
 # Run tests
 cargo test
 
-# Run specific crate tests
-cargo test -p pox-pm
+# Run CLI tests
+cargo test -p pox-cli
 ```
+
+The Riff source dependency is pinned to Git revision
+`96879c9cb48f6ed9620d6ab634fdf79b6f3e8e6b` for reproducible builds and is
+updated intentionally through `Cargo.toml` and `Cargo.lock`.
 
 ## License
 

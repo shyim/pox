@@ -1,17 +1,10 @@
-mod add;
 mod config;
-mod create_project;
-mod pm;
-mod init;
-mod install;
-mod remove;
-mod update;
+mod package_manager;
 
 use config::PoxConfig;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand, CommandFactory};
-use clap_complete::{generate, Shell};
+use clap::{Parser, Subcommand};
 use pox_embed::{HttpRequest, Php, PhpWeb, PhpWorker};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -27,7 +20,7 @@ use globset::{Glob, GlobSetBuilder};
 #[command(name = "pox")]
 #[command(about = "PHP CLI embedded in Rust")]
 #[command(disable_version_flag = true)]
-#[command(after_help = "See 'php --help' for the original PHP CLI help.")]
+#[command(after_help = "Package management is powered by Riff. Run 'pox <command> --help' for command-specific help.\n\nCommon package-manager commands:\n  init, create-project, install, update, require, add, remove, run\n  show, search, outdated, audit, validate, status, check-platform-reqs\n\nThe compatibility form 'pox pm <command>' is also supported.\nSee 'php --help' for the original PHP CLI help.")]
 #[command(args_conflicts_with_subcommands = true)]
 struct Args {
     #[command(subcommand)]
@@ -95,39 +88,6 @@ enum Commands {
         watch: Vec<String>,
     },
 
-    /// Create a new composer.json in current directory
-    Init(init::InitArgs),
-
-    /// Create a new project from a package into a directory
-    CreateProject(create_project::CreateProjectArgs),
-
-    /// Install project dependencies from composer.lock
-    Install(install::InstallArgs),
-
-    /// Update dependencies to their latest versions
-    Update(update::UpdateArgs),
-
-    /// Add a package to the project
-    Add(add::AddArgs),
-
-    /// Remove a package from the project
-    Remove(remove::RemoveArgs),
-
-    /// Package manager commands (show, validate, dump-autoload)
-    Pm {
-        #[command(subcommand)]
-        command: pm::PmCommands,
-    },
-
-    /// Run a script defined in composer.json
-    Run(pm::RunArgs),
-
-    /// Generate shell completion scripts
-    Completion {
-        /// The shell to generate completions for
-        #[arg(value_enum)]
-        shell: Shell,
-    },
 }
 
 fn print_version() {
@@ -600,6 +560,11 @@ fn guess_content_type(path: &Path) -> String {
 }
 
 fn run() -> Result<i32> {
+    let raw_arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if package_manager::should_delegate(&raw_arguments) {
+        return package_manager::execute(raw_arguments);
+    }
+
     let args = Args::parse();
 
     // Load pox.toml config if present
@@ -660,51 +625,6 @@ fn run() -> Result<i32> {
                     effective_watch,
                     config.as_ref(),
                 );
-            }
-            Commands::Init(init_args) => {
-                let rt = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-                return rt.block_on(init::execute(init_args));
-            }
-            Commands::CreateProject(create_project_args) => {
-                let rt = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-                return rt.block_on(create_project::execute(create_project_args));
-            }
-            Commands::Install(install_args) => {
-                let rt = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-                return rt.block_on(install::execute(install_args));
-            }
-            Commands::Update(update_args) => {
-                let rt = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-                return rt.block_on(update::execute(update_args));
-            }
-            Commands::Add(add_args) => {
-                let rt = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-                return rt.block_on(add::execute(add_args));
-            }
-            Commands::Remove(remove_args) => {
-                let rt = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-                return rt.block_on(remove::execute(remove_args));
-            }
-            Commands::Pm { command } => {
-                let rt = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-                return rt.block_on(pm::execute(command));
-            }
-            Commands::Run(run_args) => {
-                let rt = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-                return rt.block_on(pm::run::execute(run_args));
-            }
-            Commands::Completion { shell } => {
-                let mut cmd = Args::command();
-                generate(shell, &mut cmd, "pox", &mut std::io::stdout());
-                return Ok(0);
             }
         }
     }
@@ -780,15 +700,16 @@ fn run() -> Result<i32> {
     eprintln!("  -h, --help      Show this help message");
     eprintln!();
     eprintln!("Subcommands:");
-    eprintln!("  init            Create a new composer.json in current directory");
-    eprintln!("  install         Install project dependencies from composer.lock");
-    eprintln!("  update          Update dependencies to their latest versions");
-    eprintln!("  add             Add a package to the project");
-    eprintln!("  remove          Remove a package from the project");
-    eprintln!("  run             Run a script defined in composer.json");
     eprintln!("  server          Start a PHP development server");
-    eprintln!("  pm              Other package manager commands (dump-autoload, exec, etc.)");
-    eprintln!("  completion      Generate shell completion scripts");
+    eprintln!("  init            Create a new composer.json in current directory (Riff)");
+    eprintln!("  create-project  Create a project from a package (Riff)");
+    eprintln!("  install         Install project dependencies from composer.lock (Riff)");
+    eprintln!("  update          Update dependencies to their latest versions (Riff)");
+    eprintln!("  require, add    Add a package to the project (Riff)");
+    eprintln!("  remove          Remove a package from the project (Riff)");
+    eprintln!("  run             Run a script defined in composer.json (Riff)");
+    eprintln!("  pm              Riff package-manager compatibility prefix");
+    eprintln!("  completion      Generate Riff-powered shell completion scripts");
     eprintln!();
     eprintln!("Run 'pox --help' for more options.");
 

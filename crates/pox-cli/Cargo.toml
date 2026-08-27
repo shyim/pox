@@ -12,31 +12,17 @@ path = "src/main.rs"
 
 [dependencies]
 pox-embed = { path = "../pox-embed" }
-pox-pm = { path = "../pox-pm" }
-pox-semver = { path = "../pox-semver" }
-pox-spdx = { path = "../pox-spdx" }
+riff = { git = "https://github.com/shyim/riff.git", rev = "96879c9cb48f6ed9620d6ab634fdf79b6f3e8e6b", default-features = false }
+riff-core = { git = "https://github.com/shyim/riff.git", rev = "96879c9cb48f6ed9620d6ab634fdf79b6f3e8e6b" }
+# The embedded PHP archive already provides BZ2_* symbols. Reuse them instead
+# of compiling the second copy requested by Riff's static bzip2 feature.
+bzip2-sys = { version = "0.1.13", features = ["__disabled"] }
 clap = { version = "4", features = ["derive"] }
-clap_complete = "4"
 anyhow = "1"
 tiny_http = "0.12"
 tokio = { version = "1", features = ["full"] }
-console = "0.16"
-indicatif = "0.18"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-indexmap = "2"
 toml = "1"
-dialoguer = "0.12"
-regex = "1"
 notify = "8"
 notify-debouncer-full = "0.7"
 globset = "0.4"
-reqwest = { version = "0.13", features = ["json"] }
-urlencoding = "2"
-terminal_size = "0.4"
-log = "0.4"
-env_logger = "0.11"
-colored = "3"
-
-[dev-dependencies]
-tempfile = "3"
