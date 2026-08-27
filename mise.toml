@@ -1,0 +1,22 @@
+[tools]
+rust = "1.98.0"
+
+[tasks.build]
+description = "Build Pox without linking PHP"
+run = "cargo build --workspace --locked"
+
+[tasks.check]
+description = "Check every Pox target"
+run = "cargo check --workspace --all-targets --locked"
+
+[tasks.test]
+description = "Run tests that do not require a real PHP runtime"
+run = "cargo test --workspace --all-targets --locked"
+
+[tasks."runtime:build"]
+description = "Build the sibling pox-runtime checkout against local ZTS PHP"
+run = "./scripts/build-local-php.sh"
+
+[tasks."test:runtime"]
+description = "Run the complete suite against the locally built PHP runtime"
+run = "POX_PHP_RUNTIME=../pox-runtime/build/libpox_php.so cargo test --workspace --all-targets --features pox-embed/runtime-integration --locked -- --test-threads=1"

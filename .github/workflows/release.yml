@@ -1,0 +1,66 @@
+name: Release Pox
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            dockerfile: Dockerfile.release-glibc
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            dockerfile: Dockerfile.release-glibc
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+            dockerfile: Dockerfile.release-musl
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            dockerfile: Dockerfile.release-musl
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          outputs: type=local,dest=dist
+          build-args: TARGET=${{ matrix.target }}
+      - name: Package binary
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          chmod 0755 dist/pox
+          tar -C dist -czf "pox-${VERSION}-${TARGET}.tar.gz" pox
+          sha256sum "pox-${VERSION}-${TARGET}.tar.gz" > "pox-${VERSION}-${TARGET}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pox-${{ matrix.target }}
+          path: |
+            pox-*.tar.gz
+            pox-*.tar.gz.sha256
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pox-*
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

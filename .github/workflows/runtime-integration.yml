@@ -1,0 +1,39 @@
+name: Released runtime integration
+
+on:
+  schedule:
+    - cron: '43 5 * * *'
+  workflow_dispatch:
+  repository_dispatch:
+    types: [pox-runtime-released]
+
+jobs:
+  integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
+    runs-on: ubuntu-24.04
+    env:
+      XDG_DATA_HOME: /tmp/pox-data
+      XDG_CACHE_HOME: /tmp/pox-cache
+      XDG_CONFIG_HOME: /tmp/pox-config
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure Rust cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+      - name: Build Pox without PHP development files
+        run: cargo build --workspace --locked
+      - name: Install and select released runtime
+        run: |
+          target/debug/pox php install "${{ matrix.php }}"
+          target/debug/pox php use "${{ matrix.php }}" --global
+          target/debug/pox php current
+      - name: Run CLI, web, worker, and Riff integration tests
+        run: |
+          POX_PHP_RUNTIME="$(target/debug/pox php current | sed -n 's/^Library: //p')"
+          export POX_PHP_RUNTIME
+          cargo test --workspace --all-targets --features pox-embed/runtime-integration --locked -- --test-threads=1
+          target/debug/pox -r 'exit(PHP_ZTS ? 0 : 1);'

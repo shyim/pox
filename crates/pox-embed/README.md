@@ -1,85 +1,34 @@
 # pox-embed
 
-Rust bindings for embedding PHP via the PHP embed SAPI. This crate provides a
-safe-ish Rust interface for running PHP code, linting scripts, querying runtime
-details, and executing HTTP-style requests through a custom SAPI.
+`pox-embed` is the safe Rust loader for independently distributed Pox PHP
+runtimes. It does not compile against PHP, invoke `php-config`, or expose PHP or
+Zend structures.
 
-**What it does**
+The loaded `libpox_php.so` exports one versioned function table. This crate
+validates its ABI, target, and ZTS metadata, then wraps it in owned Rust APIs for
+CLI execution, HTTP requests, and long-running workers.
 
-- Execute PHP scripts or `-r` style code from Rust.
-- Expose PHP runtime/version metadata (PHP, Zend, ICU, OpenSSL, etc.).
-- Provide a web/request API for running a single HTTP request.
-- Provide a worker pool for long-lived PHP worker scripts.
+```rust,no_run
+use pox_embed::PhpRuntime;
 
-**Requirements**
+let php = PhpRuntime::load("/path/to/libpox_php.so")?;
+println!("PHP {}", php.version());
+php.execute_code(r#"echo "Hello from PHP\n";"#, &[] as &[&str])?;
+# Ok::<(), pox_embed::PhpError>(())
+```
 
-- A PHP build with the embed SAPI enabled (`--enable-embed`).
-- A PHP ZTS (thread-safe) build for multi-threaded usage (web/worker mode).
-- `php-config` from that same PHP build available via `PHP_CONFIG`.
+All response buffers are copied into Rust-owned values and released through
+the allocating runtime. Worker integration uses callback pointers and opaque
+userdata passed at startup; there are no globally imported Rust callback
+symbols.
 
-You can verify the build flags with:
+Set `POX_PHP_RUNTIME` and enable `runtime-integration` to run the real runtime
+suite:
 
 ```bash
-/path/to/php-config --configure-options
+POX_PHP_RUNTIME=/path/to/libpox_php.so \
+  cargo test -p pox-embed --features runtime-integration -- --test-threads=1
 ```
 
-Look for `--enable-embed` and `--enable-zts` (or `--enable-maintainer-zts` on
-older PHP versions).
-
-**Build and link**
-
-Dynamic linking (default):
-
-```bash
-PHP_CONFIG=/opt/php-zts/bin/php-config cargo build
-```
-
-Static linking (requires `--enable-embed=static` when building PHP):
-
-```bash
-PHP_CONFIG=/opt/php-zts-static/bin/php-config cargo build --features static
-```
-
-Or force static linking via environment variable:
-
-```bash
-POX_STATIC=1 PHP_CONFIG=/opt/php-zts-static/bin/php-config cargo build --release
-```
-
-**Usage**
-
-Execute PHP code or a script:
-
-```rust
-use pox_embed::Php;
-
-let exit_code = Php::execute_code(r#"echo "Hello from PHP!\n";"#, &[] as &[&str])?;
-let exit_code = Php::execute_script("script.php", &["arg1", "arg2"])?;
-```
-
-Run a single HTTP request:
-
-```rust
-use pox_embed::{HttpRequest, PhpWeb};
-
-let web = PhpWeb::new()?;
-let response = web.execute(HttpRequest {
-    method: "GET".to_string(),
-    uri: "/index.php".to_string(),
-    query_string: "".to_string(),
-    headers: vec![("Host".to_string(), "example.local".to_string())],
-    body: Vec::new(),
-    document_root: "/var/www".to_string(),
-    script_filename: "/var/www/index.php".to_string(),
-    server_name: "example.local".to_string(),
-    server_port: 80,
-    remote_addr: "127.0.0.1".to_string(),
-    remote_port: 12345,
-})?;
-```
-
-**Notes**
-
-- `PHP_CONFIG` must point to the PHP build you want to embed. Mixing headers
-  and libs from different PHP builds will fail or crash.
-- Web/worker modes assume a ZTS build because they use threads.
+The canonical C ABI and runtime implementation live in
+[`shyim/pox-runtime`](https://github.com/shyim/pox-runtime).

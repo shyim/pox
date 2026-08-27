@@ -1,467 +1,484 @@
-//! PHP Embed - Rust bindings to embed PHP via the PHP embed SAPI
+//! Safe loader for independently distributed Pox PHP runtimes.
 //!
-//! This crate provides a safe Rust interface to execute PHP scripts and code
-//! using PHP's embed SAPI (Server API).
-//!
-//! # Example
-//!
-//! ```no_run
-//! use pox_embed::Php;
-//!
-//! // Execute PHP code directly
-//! let exit_code = Php::execute_code(r#"echo "Hello from PHP!\n";"#, &[] as &[&str]).unwrap();
-//!
-//! // Execute a PHP script file
-//! let exit_code = Php::execute_script("script.php", &["arg1", "arg2"]).unwrap();
-//! ```
-//!
-//! # Building
-//!
-//! This crate requires PHP to be compiled with the embed SAPI enabled.
-//!
-//! ## Dynamic Linking (default)
-//!
-//! By default, this crate links dynamically against libphp.so/libphp.dylib.
-//! Set the `PHP_CONFIG` environment variable to point to your php-config if
-//! it's not in PATH:
-//!
-//! ```bash
-//! PHP_CONFIG=/opt/php/bin/php-config cargo build
-//! ```
-//!
-//! ## Static Linking
-//!
-//! For a fully self-contained binary, you can statically link PHP. This requires
-//! PHP to be compiled with `--enable-embed=static`:
-//!
-//! ```bash
-//! # Build PHP with static embed SAPI
-//! ./configure --enable-embed=static --prefix=/opt/php-static [other options...]
-//! make && make install
-//!
-//! # Build with static linking (auto-detected if libphp.a exists)
-//! PHP_CONFIG=/opt/php-static/bin/php-config cargo build --release
-//!
-//! # Or force static linking via environment variable
-//! POX_STATIC=1 PHP_CONFIG=/path/to/php-config cargo build --release
-//!
-//! # Or use the cargo feature
-//! PHP_CONFIG=/path/to/php-config cargo build --release --features static
-//! ```
-//!
-//! Static linking will automatically include all PHP dependencies (libxml2, openssl,
-//! zlib, etc.) that PHP was compiled with.
+//! PHP and Zend internals live entirely inside `libpox_php.so`. This crate only
+//! speaks the versioned, Pox-owned C ABI and exposes owned Rust values.
 
-use std::ffi::{CStr, CString, NulError};
-use std::os::raw::{c_char, c_int, c_void};
+use libloading::{Library, Symbol};
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::ffi::{c_void, OsStr};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
+use std::thread::{self, JoinHandle};
 use thiserror::Error;
 
-// FFI bindings to our C code - CLI mode
-extern "C" {
-    fn pox_execute_script(
-        script_path: *const c_char,
-        argc: c_int,
-        argv: *mut *mut c_char,
-    ) -> c_int;
-    fn pox_execute_code(code: *const c_char, argc: c_int, argv: *mut *mut c_char) -> c_int;
-    fn pox_lint_file(script_path: *const c_char, argc: c_int, argv: *mut *mut c_char) -> c_int;
-    fn pox_info(flag: c_int, argc: c_int, argv: *mut *mut c_char) -> c_int;
-    fn pox_print_modules(argc: c_int, argv: *mut *mut c_char) -> c_int;
-    fn pox_set_ini_entries(entries: *const c_char);
-    fn pox_get_version() -> *const c_char;
-    fn pox_get_version_id() -> c_int;
-    fn pox_get_zend_version() -> *const c_char;
-    fn pox_get_loaded_extensions(argc: c_int, argv: *mut *mut c_char) -> *mut c_char;
-    fn pox_free_string(s: *mut c_char);
+const ABI_MAJOR: u32 = 1;
+const ABI_MINOR: u32 = 0;
+const STATUS_OK: i32 = 0;
 
-    // Build-time platform info
-    fn pox_is_debug() -> c_int;
-    fn pox_is_zts() -> c_int;
-    fn pox_get_icu_version() -> *const c_char;
-    fn pox_get_libxml_version() -> *const c_char;
-    fn pox_get_openssl_version() -> *const c_char;
-    fn pox_get_pcre_version() -> *const c_char;
-    fn pox_get_zlib_version() -> *const c_char;
-    fn pox_get_curl_version() -> *const c_char;
+const CLI_EXECUTE_SCRIPT: u32 = 1;
+const CLI_EXECUTE_CODE: u32 = 2;
+const CLI_LINT: u32 = 3;
+const CLI_INFO: u32 = 4;
+const CLI_MODULES: u32 = 5;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct AbiSlice {
+    data: *const u8,
+    len: usize,
 }
 
-// FFI bindings to our C code - Web mode
-extern "C" {
-    fn pox_web_init() -> c_int;
-    fn pox_web_shutdown();
-    fn pox_web_execute(ctx: *mut c_void) -> c_int;
-    fn pox_free_response(ctx: *mut c_void);
+impl AbiSlice {
+    fn new(value: &[u8]) -> Self {
+        Self {
+            data: value.as_ptr(),
+            len: value.len(),
+        }
+    }
 }
 
-/// Errors that can occur when executing PHP
-#[derive(Error, Debug)]
+#[repr(C)]
+#[derive(Default)]
+struct AbiBuffer {
+    data: *mut u8,
+    len: usize,
+}
+
+#[repr(C)]
+struct AbiCliRequest {
+    struct_size: u32,
+    operation: u32,
+    source: AbiSlice,
+    arguments: *const AbiSlice,
+    argument_count: usize,
+    info_flags: i32,
+    reserved: [u32; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct AbiHttpRequest {
+    struct_size: u32,
+    reserved0: u32,
+    method: AbiSlice,
+    uri: AbiSlice,
+    query_string: AbiSlice,
+    headers: AbiSlice,
+    body: AbiSlice,
+    document_root: AbiSlice,
+    script_filename: AbiSlice,
+    server_name: AbiSlice,
+    remote_addr: AbiSlice,
+    server_port: u16,
+    remote_port: u16,
+    reserved: [u32; 8],
+}
+
+impl Default for AbiHttpRequest {
+    fn default() -> Self {
+        Self {
+            struct_size: std::mem::size_of::<Self>() as u32,
+            reserved0: 0,
+            method: AbiSlice::default(),
+            uri: AbiSlice::default(),
+            query_string: AbiSlice::default(),
+            headers: AbiSlice::default(),
+            body: AbiSlice::default(),
+            document_root: AbiSlice::default(),
+            script_filename: AbiSlice::default(),
+            server_name: AbiSlice::default(),
+            remote_addr: AbiSlice::default(),
+            server_port: 0,
+            remote_port: 0,
+            reserved: [0; 8],
+        }
+    }
+}
+
+#[repr(C)]
+struct AbiHttpResponse {
+    struct_size: u32,
+    status: u16,
+    reserved0: u16,
+    headers: AbiBuffer,
+    body: AbiBuffer,
+    reserved: [u32; 8],
+}
+
+impl Default for AbiHttpResponse {
+    fn default() -> Self {
+        Self {
+            struct_size: std::mem::size_of::<Self>() as u32,
+            status: 200,
+            reserved0: 0,
+            headers: AbiBuffer::default(),
+            body: AbiBuffer::default(),
+            reserved: [0; 8],
+        }
+    }
+}
+
+type WaitRequestFn = unsafe extern "C" fn(*mut c_void, *mut AbiHttpRequest) -> i32;
+type CompleteResponseFn = unsafe extern "C" fn(*mut c_void, *const AbiHttpResponse);
+
+#[repr(C)]
+struct AbiWorkerCallbacks {
+    struct_size: u32,
+    reserved0: u32,
+    userdata: *mut c_void,
+    wait_request: Option<WaitRequestFn>,
+    complete_response: Option<CompleteResponseFn>,
+    reserved: [u32; 8],
+}
+
+#[repr(C)]
+struct AbiApi {
+    struct_size: u32,
+    abi_major: u16,
+    abi_minor: u16,
+    feature_flags: u64,
+    metadata_json: unsafe extern "C" fn(*mut AbiBuffer) -> i32,
+    last_error: unsafe extern "C" fn(*mut AbiBuffer) -> i32,
+    free_buffer: unsafe extern "C" fn(*mut AbiBuffer),
+    set_ini_entries: unsafe extern "C" fn(AbiSlice) -> i32,
+    execute_cli: unsafe extern "C" fn(*const AbiCliRequest, *mut i32) -> i32,
+    web_create: unsafe extern "C" fn(*mut *mut c_void) -> i32,
+    web_execute: unsafe extern "C" fn(
+        *mut c_void,
+        *const AbiHttpRequest,
+        *mut AbiHttpResponse,
+        *mut i32,
+    ) -> i32,
+    web_destroy: unsafe extern "C" fn(*mut c_void),
+    worker_create: unsafe extern "C" fn(*mut *mut c_void) -> i32,
+    worker_run: unsafe extern "C" fn(
+        *mut c_void,
+        AbiSlice,
+        AbiSlice,
+        *const AbiWorkerCallbacks,
+        *mut i32,
+    ) -> i32,
+    worker_destroy: unsafe extern "C" fn(*mut c_void),
+    reserved: [*mut c_void; 16],
+}
+
+type GetApiFn = unsafe extern "C" fn(u32, u32) -> *const AbiApi;
+
+#[derive(Debug, Error)]
 pub enum PhpError {
-    #[error("Invalid string argument: {0}")]
-    InvalidString(#[from] NulError),
-
-    #[error("PHP initialization failed")]
-    InitFailed,
-
-    #[error("PHP execution failed with exit code {0}")]
-    ExecutionFailed(i32),
+    #[error("failed to load PHP runtime {path}: {source}")]
+    Load {
+        path: PathBuf,
+        #[source]
+        source: libloading::Error,
+    },
+    #[error("PHP runtime does not export pox_php_get_api: {0}")]
+    MissingEntrypoint(libloading::Error),
+    #[error("PHP runtime does not support Pox ABI {major}.{minor}")]
+    IncompatibleAbi { major: u32, minor: u32 },
+    #[error("PHP runtime returned an invalid ABI table")]
+    InvalidApi,
+    #[error("PHP runtime metadata is invalid: {0}")]
+    InvalidMetadata(#[from] serde_json::Error),
+    #[error("PHP runtime target is {actual}, expected {expected}")]
+    WrongTarget { expected: String, actual: String },
+    #[error("PHP runtime was built without ZTS")]
+    ZtsRequired,
+    #[error("PHP runtime {loaded} is already active; cannot also load {requested}")]
+    DifferentRuntimeLoaded { loaded: PathBuf, requested: PathBuf },
+    #[error("PHP runtime operation failed ({status}): {message}")]
+    Runtime { status: i32, message: String },
+    #[error("PHP worker pool requires at least one worker")]
+    NoWorkers,
+    #[error("PHP worker stopped before producing a response")]
+    WorkerStopped,
 }
 
-/// Result type for PHP operations
 pub type Result<T> = std::result::Result<T, PhpError>;
 
-/// PHP version information
+#[derive(Debug, Clone, Deserialize)]
+pub struct RuntimeMetadata {
+    pub php_version: String,
+    pub php_version_id: i32,
+    pub zend_version: String,
+    pub zts: bool,
+    pub debug: bool,
+    pub runtime_revision: String,
+    pub target: String,
+    pub abi_major: u16,
+    pub abi_minor: u16,
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    #[serde(default)]
+    pub libraries: BTreeMap<String, String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct PhpVersion {
-    /// Version string (e.g., "8.3.0")
-    pub version: &'static str,
-    /// Version ID (e.g., 80300 for PHP 8.3.0)
+    pub version: String,
     pub version_id: i32,
-    /// Major version number
     pub major: i32,
-    /// Minor version number
     pub minor: i32,
-    /// Release version number
     pub release: i32,
-    /// Zend Engine version
-    pub zend_version: &'static str,
+    pub zend_version: String,
 }
 
-impl PhpVersion {
-    /// Get the PHP version information
-    pub fn get() -> Self {
-        let version = unsafe {
-            let ptr = pox_get_version();
-            CStr::from_ptr(ptr).to_str().unwrap_or("unknown")
-        };
-        let version_id = unsafe { pox_get_version_id() };
-        let zend_version = unsafe {
-            let ptr = pox_get_zend_version();
-            CStr::from_ptr(ptr).to_str().unwrap_or("unknown")
-        };
-
-        Self {
-            version,
-            version_id,
-            major: version_id / 10000,
-            minor: (version_id / 100) % 100,
-            release: version_id % 100,
-            zend_version,
-        }
+impl fmt::Display for PhpVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.version)
     }
 }
 
-impl std::fmt::Display for PhpVersion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.version)
-    }
+struct RuntimeInner {
+    _library: Library,
+    api: NonNull<AbiApi>,
 }
 
-/// Helper to build argc/argv for PHP
-fn build_argv<A: AsRef<str>>(program: &str, args: &[A]) -> Result<(Vec<CString>, Vec<*mut c_char>)> {
-    let mut c_args: Vec<CString> = Vec::with_capacity(args.len() + 1);
-    c_args.push(CString::new(program)?);
-    for arg in args {
-        c_args.push(CString::new(arg.as_ref())?);
+type LoadedRuntime = Option<(PathBuf, Weak<RuntimeInner>)>;
+
+static LOADED_RUNTIME: OnceLock<Mutex<LoadedRuntime>> = OnceLock::new();
+
+// The function table is immutable and remains valid while `_library` is held.
+// PHP's own mode-specific safety is enforced by the safe handles below.
+unsafe impl Send for RuntimeInner {}
+unsafe impl Sync for RuntimeInner {}
+
+impl RuntimeInner {
+    fn api(&self) -> &AbiApi {
+        // SAFETY: `api` was checked for null and the library outlives the table.
+        unsafe { self.api.as_ref() }
     }
 
-    let mut c_argv: Vec<*mut c_char> = c_args.iter().map(|s| s.as_ptr() as *mut c_char).collect();
-    c_argv.push(std::ptr::null_mut());
-
-    Ok((c_args, c_argv))
-}
-
-/// Main interface for executing PHP code
-pub struct Php;
-
-impl Php {
-    /// Get PHP version information
-    pub fn version() -> PhpVersion {
-        PhpVersion::get()
-    }
-
-    /// Set INI entries before execution
-    ///
-    /// Entries should be in the format "key=value\nkey2=value2"
-    pub fn set_ini_entries(entries: Option<&str>) -> Result<()> {
-        match entries {
-            Some(e) => {
-                let c_entries = CString::new(e)?;
-                unsafe { pox_set_ini_entries(c_entries.as_ptr()) };
-            }
-            None => {
-                unsafe { pox_set_ini_entries(std::ptr::null()) };
-            }
-        }
-        Ok(())
-    }
-
-    /// Execute a PHP script file
-    ///
-    /// # Arguments
-    ///
-    /// * `script_path` - Path to the PHP script to execute
-    /// * `args` - Arguments to pass to the script (available in `$argv`)
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(exit_code)` on successful execution, or an error if execution failed.
-    pub fn execute_script<S, A>(script_path: S, args: &[A]) -> Result<i32>
-    where
-        S: AsRef<str>,
-        A: AsRef<str>,
-    {
-        let script_path = script_path.as_ref();
-        let c_script = CString::new(script_path)?;
-        let (_c_args, mut c_argv) = build_argv(script_path, args)?;
-
-        let exit_status = unsafe {
-            pox_execute_script(
-                c_script.as_ptr(),
-                c_argv.len() as c_int - 1,
-                c_argv.as_mut_ptr(),
-            )
+    fn take_buffer(&self, mut buffer: AbiBuffer) -> Vec<u8> {
+        let value = if buffer.data.is_null() || buffer.len == 0 {
+            Vec::new()
+        } else {
+            // SAFETY: the ABI promises a valid buffer until free_buffer.
+            unsafe { std::slice::from_raw_parts(buffer.data, buffer.len).to_vec() }
         };
-
-        Ok(exit_status)
+        // SAFETY: the buffer was allocated by this runtime.
+        unsafe { (self.api().free_buffer)(&mut buffer) };
+        value
     }
 
-    /// Execute PHP code directly
-    ///
-    /// # Arguments
-    ///
-    /// * `code` - PHP code to execute (without `<?php` tags)
-    /// * `args` - Arguments available in `$argv`
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(exit_code)` on successful execution, or an error if execution failed.
-    pub fn execute_code<S, A>(code: S, args: &[A]) -> Result<i32>
-    where
-        S: AsRef<str>,
-        A: AsRef<str>,
-    {
-        let c_code = CString::new(code.as_ref())?;
-        let (_c_args, mut c_argv) = build_argv("php", args)?;
-
-        let exit_status = unsafe {
-            pox_execute_code(c_code.as_ptr(), c_argv.len() as c_int - 1, c_argv.as_mut_ptr())
+    fn error(&self, status: i32) -> PhpError {
+        let mut buffer = AbiBuffer::default();
+        // SAFETY: output is a valid ABI buffer.
+        let error_status = unsafe { (self.api().last_error)(&mut buffer) };
+        let message = if error_status == STATUS_OK {
+            String::from_utf8_lossy(&self.take_buffer(buffer)).into_owned()
+        } else {
+            String::new()
         };
-
-        Ok(exit_status)
-    }
-
-    /// Syntax check (lint) a PHP file
-    ///
-    /// # Arguments
-    ///
-    /// * `script_path` - Path to the PHP script to check
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(0)` if syntax is valid, `Ok(1)` if there are syntax errors.
-    pub fn lint<S: AsRef<str>>(script_path: S) -> Result<i32> {
-        let script_path = script_path.as_ref();
-        let c_script = CString::new(script_path)?;
-        let (_c_args, mut c_argv) = build_argv::<&str>(script_path, &[])?;
-
-        let result = unsafe {
-            pox_lint_file(
-                c_script.as_ptr(),
-                c_argv.len() as c_int - 1,
-                c_argv.as_mut_ptr(),
-            )
-        };
-
-        Ok(result)
-    }
-
-    /// Print phpinfo() output
-    ///
-    /// # Arguments
-    ///
-    /// * `flag` - Optional flag to filter output (None for all info)
-    pub fn info(flag: Option<i32>) -> Result<i32> {
-        let (_c_args, mut c_argv) = build_argv::<&str>("php", &[])?;
-
-        let result = unsafe {
-            pox_info(
-                flag.unwrap_or(-1),
-                c_argv.len() as c_int - 1,
-                c_argv.as_mut_ptr(),
-            )
-        };
-
-        Ok(result)
-    }
-
-    /// Print loaded PHP modules
-    pub fn print_modules() -> Result<i32> {
-        let (_c_args, mut c_argv) = build_argv::<&str>("php", &[])?;
-
-        let result =
-            unsafe { pox_print_modules(c_argv.len() as c_int - 1, c_argv.as_mut_ptr()) };
-
-        Ok(result)
-    }
-
-    /// Get list of loaded PHP extensions
-    ///
-    /// Returns a vector of extension names (e.g., ["Core", "date", "json", ...])
-    pub fn get_loaded_extensions() -> Result<Vec<String>> {
-        let (_c_args, mut c_argv) = build_argv::<&str>("php", &[])?;
-
-        let ptr = unsafe {
-            pox_get_loaded_extensions(c_argv.len() as c_int - 1, c_argv.as_mut_ptr())
-        };
-
-        if ptr.is_null() {
-            return Err(PhpError::InitFailed);
-        }
-
-        let result = unsafe {
-            let c_str = CStr::from_ptr(ptr);
-            let extensions: Vec<String> = c_str
-                .to_string_lossy()
-                .lines()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .collect();
-
-            pox_free_string(ptr);
-            extensions
-        };
-
-        Ok(result)
-    }
-
-    /// Check if PHP was built with debug mode
-    pub fn is_debug() -> bool {
-        unsafe { pox_is_debug() != 0 }
-    }
-
-    /// Check if PHP was built with ZTS (thread safety)
-    pub fn is_zts() -> bool {
-        unsafe { pox_is_zts() != 0 }
-    }
-
-    /// Get ICU library version (from intl extension)
-    pub fn icu_version() -> Option<&'static str> {
-        unsafe {
-            let ptr = pox_get_icu_version();
-            if ptr.is_null() {
-                None
+        PhpError::Runtime {
+            status,
+            message: if message.is_empty() {
+                "no additional information".to_string()
             } else {
-                Some(CStr::from_ptr(ptr).to_str().unwrap_or(""))
-            }
+                message
+            },
         }
     }
 
-    /// Get libxml version
-    pub fn libxml_version() -> Option<&'static str> {
-        unsafe {
-            let ptr = pox_get_libxml_version();
-            if ptr.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(ptr).to_str().unwrap_or(""))
-            }
-        }
-    }
-
-    /// Get OpenSSL version text
-    pub fn openssl_version() -> Option<&'static str> {
-        unsafe {
-            let ptr = pox_get_openssl_version();
-            if ptr.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(ptr).to_str().unwrap_or(""))
-            }
-        }
-    }
-
-    /// Get PCRE version
-    pub fn pcre_version() -> Option<&'static str> {
-        unsafe {
-            let ptr = pox_get_pcre_version();
-            if ptr.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(ptr).to_str().unwrap_or(""))
-            }
-        }
-    }
-
-    /// Get zlib version
-    pub fn zlib_version() -> Option<&'static str> {
-        unsafe {
-            let ptr = pox_get_zlib_version();
-            if ptr.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(ptr).to_str().unwrap_or(""))
-            }
-        }
-    }
-
-    /// Get curl version
-    pub fn curl_version() -> Option<&'static str> {
-        unsafe {
-            let ptr = pox_get_curl_version();
-            if ptr.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(ptr).to_str().unwrap_or(""))
-            }
+    fn check(&self, status: i32) -> Result<()> {
+        if status == STATUS_OK {
+            Ok(())
+        } else {
+            Err(self.error(status))
         }
     }
 }
 
-// ============================================================================
-// Web Server Support
-// ============================================================================
-
-/// Request context for web requests - must match the C struct layout exactly
-#[repr(C)]
-pub struct PhpRequestContext {
-    // Request info
-    method: *const c_char,
-    uri: *const c_char,
-    query_string: *const c_char,
-    content_type: *const c_char,
-    content_length: usize,
-    request_body: *const c_char,
-    request_body_len: usize,
-    request_body_read: usize,
-
-    // Headers (key: value\n format)
-    headers: *const c_char,
-
-    // Document root and script
-    document_root: *const c_char,
-    script_filename: *const c_char,
-
-    // Server info
-    server_name: *const c_char,
-    server_port: c_int,
-    remote_addr: *const c_char,
-    remote_port: c_int,
-
-    // Response output buffer (filled by C code)
-    response_body: *mut c_char,
-    response_body_len: usize,
-    response_body_cap: usize,
-
-    // Response headers (filled by C code)
-    response_headers: *mut c_char,
-    response_headers_len: usize,
-    response_headers_cap: usize,
-
-    // Response status
-    response_status: c_int,
+#[derive(Clone)]
+pub struct PhpRuntime {
+    inner: Arc<RuntimeInner>,
+    metadata: Arc<RuntimeMetadata>,
+    path: Arc<PathBuf>,
 }
 
-/// HTTP request to execute
+impl fmt::Debug for PhpRuntime {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PhpRuntime")
+            .field("path", &self.path)
+            .field("metadata", &self.metadata)
+            .finish()
+    }
+}
+
+impl PhpRuntime {
+    /// Load and validate an independently installed PHP runtime.
+    pub fn load(path: impl AsRef<OsStr>) -> Result<Self> {
+        let requested_path = PathBuf::from(path.as_ref());
+        let path = requested_path
+            .canonicalize()
+            .unwrap_or_else(|_| requested_path.clone());
+        let registry = LOADED_RUNTIME.get_or_init(|| Mutex::new(None));
+        let mut registry = registry.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some((loaded_path, weak)) = registry.as_ref() {
+            if let Some(inner) = weak.upgrade() {
+                if loaded_path != &path {
+                    return Err(PhpError::DifferentRuntimeLoaded {
+                        loaded: loaded_path.clone(),
+                        requested: path,
+                    });
+                }
+                return Self::from_inner(path, inner);
+            }
+        }
+        // SAFETY: library lifetime is retained by RuntimeInner.
+        let library = unsafe { Library::new(&path) }.map_err(|source| PhpError::Load {
+            path: path.clone(),
+            source,
+        })?;
+        // SAFETY: the symbol type is the stable ABI entrypoint contract.
+        let get_api: Symbol<GetApiFn> =
+            unsafe { library.get(b"pox_php_get_api\0") }.map_err(PhpError::MissingEntrypoint)?;
+        // SAFETY: requesting the supported ABI has no side effects.
+        let api_ptr = unsafe { get_api(ABI_MAJOR, ABI_MINOR) };
+        let api = NonNull::new(api_ptr.cast_mut()).ok_or(PhpError::IncompatibleAbi {
+            major: ABI_MAJOR,
+            minor: ABI_MINOR,
+        })?;
+        // SAFETY: non-null pointer is owned by the loaded library.
+        let api_ref = unsafe { api.as_ref() };
+        if api_ref.struct_size < std::mem::size_of::<AbiApi>() as u32
+            || api_ref.abi_major != ABI_MAJOR as u16
+            || api_ref.abi_minor < ABI_MINOR as u16
+        {
+            return Err(PhpError::InvalidApi);
+        }
+        let inner = Arc::new(RuntimeInner {
+            _library: library,
+            api,
+        });
+
+        let runtime = Self::from_inner(path.clone(), inner.clone())?;
+        *registry = Some((path, Arc::downgrade(&inner)));
+        Ok(runtime)
+    }
+
+    fn from_inner(path: PathBuf, inner: Arc<RuntimeInner>) -> Result<Self> {
+        let mut metadata_buffer = AbiBuffer::default();
+        // SAFETY: output points to initialized writable storage.
+        let status = unsafe { (inner.api().metadata_json)(&mut metadata_buffer) };
+        inner.check(status)?;
+        let metadata: RuntimeMetadata =
+            serde_json::from_slice(&inner.take_buffer(metadata_buffer))?;
+        let expected = runtime_target().to_string();
+        if metadata.target != expected {
+            return Err(PhpError::WrongTarget {
+                expected,
+                actual: metadata.target,
+            });
+        }
+        if !metadata.zts {
+            return Err(PhpError::ZtsRequired);
+        }
+        Ok(Self {
+            inner,
+            metadata: Arc::new(metadata),
+            path: Arc::new(path),
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        self.path.as_ref()
+    }
+
+    pub fn metadata(&self) -> &RuntimeMetadata {
+        &self.metadata
+    }
+
+    pub fn version(&self) -> PhpVersion {
+        let id = self.metadata.php_version_id;
+        PhpVersion {
+            version: self.metadata.php_version.clone(),
+            version_id: id,
+            major: id / 10_000,
+            minor: (id / 100) % 100,
+            release: id % 100,
+            zend_version: self.metadata.zend_version.clone(),
+        }
+    }
+
+    pub fn set_ini_entries(&self, entries: Option<&str>) -> Result<()> {
+        let slice = AbiSlice::new(entries.unwrap_or_default().as_bytes());
+        // SAFETY: input remains valid for the duration of the call.
+        let status = unsafe { (self.inner.api().set_ini_entries)(slice) };
+        self.inner.check(status)
+    }
+
+    fn execute_cli<A: AsRef<str>>(
+        &self,
+        operation: u32,
+        source: &str,
+        args: &[A],
+        info_flags: i32,
+    ) -> Result<i32> {
+        let argument_bytes = args
+            .iter()
+            .map(|argument| argument.as_ref().as_bytes())
+            .collect::<Vec<_>>();
+        let arguments = argument_bytes
+            .iter()
+            .map(|argument| AbiSlice::new(argument))
+            .collect::<Vec<_>>();
+        let request = AbiCliRequest {
+            struct_size: std::mem::size_of::<AbiCliRequest>() as u32,
+            operation,
+            source: AbiSlice::new(source.as_bytes()),
+            arguments: arguments.as_ptr(),
+            argument_count: arguments.len(),
+            info_flags,
+            reserved: [0; 8],
+        };
+        let mut exit_code = 1;
+        // SAFETY: all request slices remain valid for the call.
+        let status = unsafe { (self.inner.api().execute_cli)(&request, &mut exit_code) };
+        self.inner.check(status)?;
+        Ok(exit_code)
+    }
+
+    pub fn execute_script<A: AsRef<str>>(&self, path: &str, args: &[A]) -> Result<i32> {
+        self.execute_cli(CLI_EXECUTE_SCRIPT, path, args, 0)
+    }
+
+    pub fn execute_code<A: AsRef<str>>(&self, code: &str, args: &[A]) -> Result<i32> {
+        self.execute_cli(CLI_EXECUTE_CODE, code, args, 0)
+    }
+
+    pub fn lint<A: AsRef<str>>(&self, path: &str, args: &[A]) -> Result<i32> {
+        self.execute_cli(CLI_LINT, path, args, 0)
+    }
+
+    pub fn info(&self, flags: Option<i32>) -> Result<i32> {
+        self.execute_cli::<&str>(CLI_INFO, "phpinfo", &[], flags.unwrap_or(-1))
+    }
+
+    pub fn print_modules(&self) -> Result<i32> {
+        self.execute_cli::<&str>(CLI_MODULES, "modules", &[], 0)
+    }
+
+    pub fn web(&self) -> Result<WebRuntime> {
+        WebRuntime::new(self.clone())
+    }
+
+    pub fn workers(
+        &self,
+        script_filename: &str,
+        document_root: &str,
+        count: usize,
+    ) -> Result<WorkerPool> {
+        WorkerPool::new(self.clone(), script_filename, document_root, count)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct HttpRequest {
     pub method: String,
     pub uri: String,
@@ -476,466 +493,355 @@ pub struct HttpRequest {
     pub remote_port: u16,
 }
 
-/// HTTP response from PHP execution
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpResponse {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
 }
 
-/// PHP web server runtime
-pub struct PhpWeb {
-    _initialized: bool,
+struct PreparedRequest<'a> {
+    headers: String,
+    request: &'a HttpRequest,
 }
 
-impl PhpWeb {
-    /// Initialize the PHP web runtime
-    pub fn new() -> Result<Self> {
-        let result = unsafe { pox_web_init() };
-        if result != 0 {
-            return Err(PhpError::InitFailed);
-        }
-        Ok(Self { _initialized: true })
-    }
+struct OwnedPreparedRequest {
+    headers: String,
+    request: HttpRequest,
+}
 
-    /// Execute an HTTP request and return the response
-    pub fn execute(&self, request: HttpRequest) -> Result<HttpResponse> {
-        // Convert strings to CStrings, keeping them alive
-        let method = CString::new(request.method)?;
-        let uri = CString::new(request.uri)?;
-        let query_string = CString::new(request.query_string)?;
-        let document_root = CString::new(request.document_root)?;
-        let script_filename = CString::new(request.script_filename)?;
-        let server_name = CString::new(request.server_name)?;
-        let remote_addr = CString::new(request.remote_addr)?;
-
-        // Format headers as "Key: Value\n" string
-        let headers_str: String = request
+impl OwnedPreparedRequest {
+    fn new(request: HttpRequest) -> Self {
+        let headers = request
             .headers
             .iter()
-            .map(|(k, v)| format!("{}: {}\n", k, v))
+            .map(|(name, value)| format!("{name}: {value}\n"))
             .collect();
-        let headers = CString::new(headers_str)?;
+        Self { headers, request }
+    }
 
-        // Get content type from headers
-        let content_type = request
+    fn abi(&self) -> AbiHttpRequest {
+        AbiHttpRequest {
+            struct_size: std::mem::size_of::<AbiHttpRequest>() as u32,
+            reserved0: 0,
+            method: AbiSlice::new(self.request.method.as_bytes()),
+            uri: AbiSlice::new(self.request.uri.as_bytes()),
+            query_string: AbiSlice::new(self.request.query_string.as_bytes()),
+            headers: AbiSlice::new(self.headers.as_bytes()),
+            body: AbiSlice::new(&self.request.body),
+            document_root: AbiSlice::new(self.request.document_root.as_bytes()),
+            script_filename: AbiSlice::new(self.request.script_filename.as_bytes()),
+            server_name: AbiSlice::new(self.request.server_name.as_bytes()),
+            remote_addr: AbiSlice::new(self.request.remote_addr.as_bytes()),
+            server_port: self.request.server_port,
+            remote_port: self.request.remote_port,
+            reserved: [0; 8],
+        }
+    }
+}
+
+impl<'a> PreparedRequest<'a> {
+    fn new(request: &'a HttpRequest) -> Self {
+        let headers = request
             .headers
             .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-            .map(|(_, v)| v.clone())
-            .unwrap_or_default();
-        let content_type_c = CString::new(content_type)?;
+            .map(|(name, value)| format!("{name}: {value}\n"))
+            .collect();
+        Self { headers, request }
+    }
 
-        // Create the request context
-        let mut ctx = PhpRequestContext {
-            method: method.as_ptr(),
-            uri: uri.as_ptr(),
-            query_string: query_string.as_ptr(),
-            content_type: content_type_c.as_ptr(),
-            content_length: request.body.len(),
-            request_body: request.body.as_ptr() as *const c_char,
-            request_body_len: request.body.len(),
-            request_body_read: 0,
-            headers: headers.as_ptr(),
-            document_root: document_root.as_ptr(),
-            script_filename: script_filename.as_ptr(),
-            server_name: server_name.as_ptr(),
-            server_port: request.server_port as c_int,
-            remote_addr: remote_addr.as_ptr(),
-            remote_port: request.remote_port as c_int,
-            response_body: std::ptr::null_mut(),
-            response_body_len: 0,
-            response_body_cap: 0,
-            response_headers: std::ptr::null_mut(),
-            response_headers_len: 0,
-            response_headers_cap: 0,
-            response_status: 200,
-        };
-
-        // Execute the request
-        let _exit_code = unsafe { pox_web_execute(&mut ctx as *mut _ as *mut c_void) };
-
-        // Extract response body
-        let body = if !ctx.response_body.is_null() && ctx.response_body_len > 0 {
-            unsafe {
-                std::slice::from_raw_parts(ctx.response_body as *const u8, ctx.response_body_len)
-                    .to_vec()
-            }
-        } else {
-            Vec::new()
-        };
-
-        // Parse response headers
-        let mut response_headers = Vec::new();
-        if !ctx.response_headers.is_null() && ctx.response_headers_len > 0 {
-            let headers_bytes = unsafe {
-                std::slice::from_raw_parts(
-                    ctx.response_headers as *const u8,
-                    ctx.response_headers_len,
-                )
-            };
-            if let Ok(headers_str) = std::str::from_utf8(headers_bytes) {
-                for line in headers_str.lines() {
-                    if let Some(colon_pos) = line.find(':') {
-                        let key = line[..colon_pos].trim().to_string();
-                        let value = line[colon_pos + 1..].trim().to_string();
-                        response_headers.push((key, value));
-                    }
-                }
-            }
+    fn abi(&self) -> AbiHttpRequest {
+        AbiHttpRequest {
+            struct_size: std::mem::size_of::<AbiHttpRequest>() as u32,
+            reserved0: 0,
+            method: AbiSlice::new(self.request.method.as_bytes()),
+            uri: AbiSlice::new(self.request.uri.as_bytes()),
+            query_string: AbiSlice::new(self.request.query_string.as_bytes()),
+            headers: AbiSlice::new(self.headers.as_bytes()),
+            body: AbiSlice::new(&self.request.body),
+            document_root: AbiSlice::new(self.request.document_root.as_bytes()),
+            script_filename: AbiSlice::new(self.request.script_filename.as_bytes()),
+            server_name: AbiSlice::new(self.request.server_name.as_bytes()),
+            remote_addr: AbiSlice::new(self.request.remote_addr.as_bytes()),
+            server_port: self.request.server_port,
+            remote_port: self.request.remote_port,
+            reserved: [0; 8],
         }
+    }
+}
 
-        // Free C-allocated response buffers
-        unsafe { pox_free_response(&mut ctx as *mut _ as *mut c_void) };
-
-        Ok(HttpResponse {
-            status: ctx.response_status as u16,
-            headers: response_headers,
-            body,
+fn parse_headers(bytes: &[u8]) -> Vec<(String, String)> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .filter_map(|line| {
+            line.split_once(':')
+                .map(|(name, value)| (name.trim().to_string(), value.trim().to_string()))
         })
+        .collect()
+}
+
+fn copy_response(response: &AbiHttpResponse) -> HttpResponse {
+    let headers = if response.headers.data.is_null() || response.headers.len == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: runtime owns this buffer for the current call/callback.
+        parse_headers(unsafe {
+            std::slice::from_raw_parts(response.headers.data, response.headers.len)
+        })
+    };
+    let body = if response.body.data.is_null() || response.body.len == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: runtime owns this buffer for the current call/callback.
+        unsafe { std::slice::from_raw_parts(response.body.data, response.body.len).to_vec() }
+    };
+    HttpResponse {
+        status: response.status,
+        headers,
+        body,
     }
 }
 
-impl Default for PhpWeb {
-    fn default() -> Self {
-        Self::new().expect("Failed to initialize PHP web runtime")
+pub struct WebRuntime {
+    runtime: PhpRuntime,
+    handle: NonNull<c_void>,
+}
+
+unsafe impl Send for WebRuntime {}
+
+impl WebRuntime {
+    fn new(runtime: PhpRuntime) -> Result<Self> {
+        let mut handle = std::ptr::null_mut();
+        // SAFETY: output is valid writable storage.
+        let status = unsafe { (runtime.inner.api().web_create)(&mut handle) };
+        runtime.inner.check(status)?;
+        let handle = NonNull::new(handle).ok_or(PhpError::InvalidApi)?;
+        Ok(Self { runtime, handle })
+    }
+
+    pub fn execute(&self, request: HttpRequest) -> Result<HttpResponse> {
+        let prepared = PreparedRequest::new(&request);
+        let abi_request = prepared.abi();
+        let mut response = AbiHttpResponse::default();
+        let mut exit_code = 1;
+        // SAFETY: request inputs and output remain valid during the call.
+        let status = unsafe {
+            (self.runtime.inner.api().web_execute)(
+                self.handle.as_ptr(),
+                &abi_request,
+                &mut response,
+                &mut exit_code,
+            )
+        };
+        self.runtime.inner.check(status)?;
+        let value = copy_response(&response);
+        // Buffers are transferred to the host for web calls.
+        unsafe {
+            (self.runtime.inner.api().free_buffer)(&mut response.headers);
+            (self.runtime.inner.api().free_buffer)(&mut response.body);
+        }
+        Ok(value)
     }
 }
 
-impl Drop for PhpWeb {
+impl Drop for WebRuntime {
     fn drop(&mut self) {
-        unsafe { pox_web_shutdown() };
+        // SAFETY: this handle was returned by web_create and is unique here.
+        unsafe { (self.runtime.inner.api().web_destroy)(self.handle.as_ptr()) };
     }
 }
 
-// ============================================================================
-// Worker Mode Support
-// ============================================================================
-
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread::{self, JoinHandle};
-
-// FFI bindings for worker mode
-extern "C" {
-    fn pox_worker_global_init() -> c_int;
-    fn pox_worker_run(script_filename: *const c_char, document_root: *const c_char) -> c_int;
-    fn pox_worker_set_request(ctx: *mut c_void);
-}
-
-/// Holds CStrings that must live as long as the request context
-struct RequestStrings {
-    method: CString,
-    uri: CString,
-    query_string: CString,
-    document_root: CString,
-    script_filename: CString,
-    server_name: CString,
-    remote_addr: CString,
-    headers: CString,
-    content_type: CString,
-    body: Vec<u8>,
-}
-
-// Safety: RequestStrings only contains owned data (CString, Vec<u8>) which are Send+Sync
-unsafe impl Send for RequestStrings {}
-unsafe impl Sync for RequestStrings {}
-
-// Safety: PhpRequestContext contains raw pointers that point to data owned by RequestStrings.
-// The data it points to is kept alive by RequestStrings stored alongside it in WorkerThreadState.
-// Access is synchronized through Mutex<Option<(Box<PhpRequestContext>, RequestStrings)>>.
-unsafe impl Send for PhpRequestContext {}
-unsafe impl Sync for PhpRequestContext {}
-
-/// State shared between Rust and the PHP worker thread
-struct WorkerThreadState {
-    /// The request context to process (context + strings that must stay alive)
-    request: Mutex<Option<(Box<PhpRequestContext>, Box<RequestStrings>)>>,
-    /// Condition variable to signal worker that a request is available
+struct WorkerState {
+    request: Mutex<Option<OwnedPreparedRequest>>,
     request_available: Condvar,
-    /// Condition variable to signal Rust that the response is ready
+    response: Mutex<Option<HttpResponse>>,
     response_ready: Condvar,
-    /// Condition variable to signal C that Rust has finished reading
-    response_consumed: Condvar,
-    /// Whether the worker should shut down
     shutdown: AtomicBool,
-    /// Whether we're currently processing a request
     processing: AtomicBool,
-    /// Whether the response is ready
-    has_response: AtomicBool,
-    /// Whether Rust has finished reading the response
-    response_read: AtomicBool,
 }
 
-impl WorkerThreadState {
+impl WorkerState {
     fn new() -> Self {
         Self {
             request: Mutex::new(None),
             request_available: Condvar::new(),
+            response: Mutex::new(None),
             response_ready: Condvar::new(),
-            response_consumed: Condvar::new(),
             shutdown: AtomicBool::new(false),
             processing: AtomicBool::new(false),
-            has_response: AtomicBool::new(false),
-            response_read: AtomicBool::new(false),
         }
     }
 }
 
-// Thread-local storage for worker state
-thread_local! {
-    static WORKER_STATE: std::cell::RefCell<Option<Arc<WorkerThreadState>>> = const { std::cell::RefCell::new(None) };
-}
-
-/// Called from C when the worker is waiting for a request
-#[no_mangle]
-pub extern "C" fn pox_worker_wait_for_request() -> c_int {
-    WORKER_STATE.with(|state| {
-        let state_ref = state.borrow();
-        if let Some(ref worker_state) = *state_ref {
-            // Check for shutdown
-            if worker_state.shutdown.load(Ordering::SeqCst) {
-                return 0;
-            }
-
-            // Wait for a request
-            let mut request = worker_state.request.lock().unwrap_or_else(|e| e.into_inner());
-            while request.is_none() && !worker_state.shutdown.load(Ordering::SeqCst) {
-                request = worker_state.request_available.wait(request).unwrap_or_else(|e| e.into_inner());
-            }
-
-            if worker_state.shutdown.load(Ordering::SeqCst) {
-                return 0;
-            }
-
-            // Set the request context in C
-            if let Some((ref mut ctx, _)) = *request {
-                unsafe {
-                    pox_worker_set_request(ctx.as_mut() as *mut PhpRequestContext as *mut c_void);
-                }
-                worker_state.processing.store(true, Ordering::SeqCst);
-                return 1;
-            }
+unsafe extern "C" fn worker_wait_request(
+    userdata: *mut c_void,
+    output: *mut AbiHttpRequest,
+) -> i32 {
+    std::panic::catch_unwind(|| {
+        // SAFETY: userdata is an Arc<WorkerState> retained for worker_run.
+        let state = unsafe { &*(userdata.cast::<WorkerState>()) };
+        let mut request = state
+            .request
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        while request.is_none() && !state.shutdown.load(Ordering::SeqCst) {
+            request = state
+                .request_available
+                .wait(request)
+                .unwrap_or_else(|error| error.into_inner());
         }
-        0
+        if state.shutdown.load(Ordering::SeqCst) {
+            return 0;
+        }
+        let prepared = request.as_ref().expect("request checked above");
+        // The request and serialized headers remain in WorkerState until the
+        // matching response callback completes.
+        unsafe { *output = prepared.abi() };
+        state.processing.store(true, Ordering::SeqCst);
+        1
     })
+    .unwrap_or(0)
 }
 
-/// Called from C when the worker has finished processing a request
-/// This function blocks until Rust has finished reading the response
-#[no_mangle]
-pub extern "C" fn pox_worker_request_done() {
-    WORKER_STATE.with(|state| {
-        let state_ref = state.borrow();
-        if let Some(ref worker_state) = *state_ref {
-            // Signal that the response is ready
-            worker_state.has_response.store(true, Ordering::SeqCst);
-            worker_state.processing.store(false, Ordering::SeqCst);
-            worker_state.response_ready.notify_all();
-
-            // Wait for Rust to finish reading the response
-            let req = worker_state.request.lock().unwrap_or_else(|e| e.into_inner());
-            let _guard = worker_state.response_consumed.wait_while(req, |_| {
-                !worker_state.response_read.load(Ordering::SeqCst)
-                    && !worker_state.shutdown.load(Ordering::SeqCst)
-            }).unwrap_or_else(|e| e.into_inner());
-
-            // Reset for next request
-            worker_state.response_read.store(false, Ordering::SeqCst);
-        }
+unsafe extern "C" fn worker_complete_response(
+    userdata: *mut c_void,
+    response: *const AbiHttpResponse,
+) {
+    let _ = std::panic::catch_unwind(|| {
+        // SAFETY: callback arguments are valid for the callback duration.
+        let state = unsafe { &*(userdata.cast::<WorkerState>()) };
+        let value = copy_response(unsafe { &*response });
+        *state
+            .response
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(value);
+        *state
+            .request
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = None;
+        state.processing.store(false, Ordering::SeqCst);
+        state.response_ready.notify_all();
     });
 }
 
-/// A worker thread that runs a long-lived PHP script
+struct WorkerRuntimeHandle {
+    runtime: PhpRuntime,
+    handle: NonNull<c_void>,
+}
+
+unsafe impl Send for WorkerRuntimeHandle {}
+unsafe impl Sync for WorkerRuntimeHandle {}
+
+impl Drop for WorkerRuntimeHandle {
+    fn drop(&mut self) {
+        // Worker threads are joined before the last handle is dropped.
+        unsafe { (self.runtime.inner.api().worker_destroy)(self.handle.as_ptr()) };
+    }
+}
+
 struct WorkerThread {
+    state: Arc<WorkerState>,
     handle: Option<JoinHandle<()>>,
-    state: Arc<WorkerThreadState>,
 }
 
 impl WorkerThread {
-    fn new(script_filename: String, document_root: String) -> Self {
-        let state = Arc::new(WorkerThreadState::new());
-        let state_clone = state.clone();
-
+    fn spawn(runtime: Arc<WorkerRuntimeHandle>, script: String, root: String) -> Self {
+        let state = Arc::new(WorkerState::new());
+        let thread_state = state.clone();
         let handle = thread::spawn(move || {
-            // Set up thread-local state
-            WORKER_STATE.with(|s| {
-                *s.borrow_mut() = Some(state_clone);
-            });
-
-            // Run the worker script
-            let c_script = CString::new(script_filename).unwrap();
-            let c_docroot = CString::new(document_root).unwrap();
-            unsafe {
-                pox_worker_run(c_script.as_ptr(), c_docroot.as_ptr());
-            }
+            let userdata = Arc::into_raw(thread_state).cast_mut().cast::<c_void>();
+            let callbacks = AbiWorkerCallbacks {
+                struct_size: std::mem::size_of::<AbiWorkerCallbacks>() as u32,
+                reserved0: 0,
+                userdata,
+                wait_request: Some(worker_wait_request),
+                complete_response: Some(worker_complete_response),
+                reserved: [0; 8],
+            };
+            let mut exit_code = 1;
+            // SAFETY: callbacks and strings live until worker_run returns.
+            let _status = unsafe {
+                (runtime.runtime.inner.api().worker_run)(
+                    runtime.handle.as_ptr(),
+                    AbiSlice::new(script.as_bytes()),
+                    AbiSlice::new(root.as_bytes()),
+                    &callbacks,
+                    &mut exit_code,
+                )
+            };
+            // SAFETY: balances Arc::into_raw above.
+            let state = unsafe { Arc::from_raw(userdata.cast::<WorkerState>()) };
+            state.shutdown.store(true, Ordering::SeqCst);
+            state.request_available.notify_all();
+            state.response_ready.notify_all();
         });
-
         Self {
-            handle: Some(handle),
             state,
+            handle: Some(handle),
         }
     }
 
     fn is_available(&self) -> bool {
         !self.state.processing.load(Ordering::SeqCst)
+            && self
+                .state
+                .request
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_none()
             && !self.state.shutdown.load(Ordering::SeqCst)
     }
 
-    fn submit_request(&self, request: HttpRequest) -> Result<HttpResponse> {
-        // Convert the request to CStrings that will be stored alongside the context
-        let method = CString::new(request.method)?;
-        let uri = CString::new(request.uri)?;
-        let query_string = CString::new(request.query_string)?;
-        let document_root = CString::new(request.document_root)?;
-        let script_filename = CString::new(request.script_filename)?;
-        let server_name = CString::new(request.server_name)?;
-        let remote_addr = CString::new(request.remote_addr)?;
-
-        // Format headers
-        let headers_str: String = request
-            .headers
-            .iter()
-            .map(|(k, v)| format!("{}: {}\n", k, v))
-            .collect();
-        let headers = CString::new(headers_str)?;
-
-        // Get content type
-        let content_type_str = request
-            .headers
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-            .map(|(_, v)| v.clone())
-            .unwrap_or_default();
-        let content_type = CString::new(content_type_str)?;
-
-        let body = request.body;
-        let body_len = body.len();
-        let server_port = request.server_port;
-        let remote_port = request.remote_port;
-
-        // Store strings that need to live as long as the context
-        // We Box it so it has a stable address
-        let strings = Box::new(RequestStrings {
-            method,
-            uri,
-            query_string,
-            document_root,
-            script_filename,
-            server_name,
-            remote_addr,
-            headers,
-            content_type,
-            body,
-        });
-
-        // Create the request context pointing to the boxed strings
-        let ctx = Box::new(PhpRequestContext {
-            method: strings.method.as_ptr(),
-            uri: strings.uri.as_ptr(),
-            query_string: strings.query_string.as_ptr(),
-            content_type: strings.content_type.as_ptr(),
-            content_length: body_len,
-            request_body: strings.body.as_ptr() as *const c_char,
-            request_body_len: body_len,
-            request_body_read: 0,
-            headers: strings.headers.as_ptr(),
-            document_root: strings.document_root.as_ptr(),
-            script_filename: strings.script_filename.as_ptr(),
-            server_name: strings.server_name.as_ptr(),
-            server_port: server_port as c_int,
-            remote_addr: strings.remote_addr.as_ptr(),
-            remote_port: remote_port as c_int,
-            response_body: std::ptr::null_mut(),
-            response_body_len: 0,
-            response_body_cap: 0,
-            response_headers: std::ptr::null_mut(),
-            response_headers_len: 0,
-            response_headers_cap: 0,
-            response_status: 200,
-        });
-
-        // Store the request and strings together, then signal the worker
+    fn submit(&self, request: HttpRequest) -> Result<HttpResponse> {
+        *self
+            .state
+            .response
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = None;
         {
-            let mut req = self.state.request.lock().unwrap_or_else(|e| e.into_inner());
-            *req = Some((ctx, strings));
-            self.state.has_response.store(false, Ordering::SeqCst);
+            let mut slot = self
+                .state
+                .request
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            while slot.is_some() && !self.state.shutdown.load(Ordering::SeqCst) {
+                drop(slot);
+                thread::yield_now();
+                slot = self
+                    .state
+                    .request
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+            }
+            if self.state.shutdown.load(Ordering::SeqCst) {
+                return Err(PhpError::WorkerStopped);
+            }
+            *slot = Some(OwnedPreparedRequest::new(request));
             self.state.request_available.notify_one();
         }
 
-        // Wait for the response
-        {
-            let req = self.state.request.lock().unwrap_or_else(|e| e.into_inner());
-            let _guard = self.state.response_ready.wait_while(req, |_| {
-                !self.state.has_response.load(Ordering::SeqCst)
-            }).unwrap_or_else(|e| e.into_inner());
+        let mut response = self
+            .state
+            .response
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        while response.is_none() && !self.state.shutdown.load(Ordering::SeqCst) {
+            response = self
+                .state
+                .response_ready
+                .wait(response)
+                .unwrap_or_else(|error| error.into_inner());
         }
-
-        // Extract response
-        let mut req = self.state.request.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((ref ctx, _)) = *req {
-            // Extract response body
-            let body = if !ctx.response_body.is_null() && ctx.response_body_len > 0 {
-                unsafe {
-                    std::slice::from_raw_parts(ctx.response_body as *const u8, ctx.response_body_len)
-                        .to_vec()
-                }
-            } else {
-                Vec::new()
-            };
-
-            // Parse response headers
-            let mut response_headers = Vec::new();
-            if !ctx.response_headers.is_null() && ctx.response_headers_len > 0 {
-                let headers_bytes = unsafe {
-                    std::slice::from_raw_parts(
-                        ctx.response_headers as *const u8,
-                        ctx.response_headers_len,
-                    )
-                };
-                if let Ok(headers_str) = std::str::from_utf8(headers_bytes) {
-                    for line in headers_str.lines() {
-                        if let Some(colon_pos) = line.find(':') {
-                            let key = line[..colon_pos].trim().to_string();
-                            let value = line[colon_pos + 1..].trim().to_string();
-                            response_headers.push((key, value));
-                        }
-                    }
-                }
-            }
-
-            let status = ctx.response_status as u16;
-
-            // Free response buffers
-            unsafe { pox_free_response(ctx.as_ref() as *const PhpRequestContext as *mut c_void) };
-
-            // Clear the request
-            *req = None;
-
-            // Signal that we're done reading, so C can continue
-            self.state.response_read.store(true, Ordering::SeqCst);
-            self.state.response_consumed.notify_all();
-
-            Ok(HttpResponse {
-                status,
-                headers: response_headers,
-                body,
-            })
-        } else {
-            // Still signal even on error so C doesn't block forever
-            self.state.response_read.store(true, Ordering::SeqCst);
-            self.state.response_consumed.notify_all();
-            Err(PhpError::ExecutionFailed(1))
-        }
+        response.take().ok_or(PhpError::WorkerStopped)
     }
 
     fn shutdown(&self) {
         self.state.shutdown.store(true, Ordering::SeqCst);
         self.state.request_available.notify_all();
-        self.state.response_consumed.notify_all();
+        self.state.response_ready.notify_all();
     }
 
-    fn shutdown_and_join(mut self) {
+    fn join(mut self) {
         self.shutdown();
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
@@ -943,107 +849,91 @@ impl WorkerThread {
     }
 }
 
-impl Drop for WorkerThread {
-    fn drop(&mut self) {
-        self.shutdown();
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-    }
-}
-
-/// PHP Worker pool for handling requests with long-lived PHP processes
-pub struct PhpWorker {
+pub struct WorkerPool {
+    runtime: Arc<WorkerRuntimeHandle>,
     workers: Vec<WorkerThread>,
     next_worker: AtomicUsize,
     script_filename: String,
     document_root: String,
-    num_workers: usize,
+    count: usize,
 }
 
-impl PhpWorker {
-    /// Create a new worker pool
-    ///
-    /// # Arguments
-    ///
-    /// * `script_filename` - Path to the worker PHP script
-    /// * `document_root` - Document root directory
-    /// * `num_workers` - Number of worker threads to create
-    pub fn new(script_filename: &str, document_root: &str, num_workers: usize) -> Result<Self> {
-        // Initialize PHP globally BEFORE spawning any worker threads
-        // This sets up TSRM, SAPI, and other global state that must only be initialized once
-        let result = unsafe { pox_worker_global_init() };
-        if result != 0 {
-            return Err(PhpError::InitFailed);
+impl WorkerPool {
+    fn new(
+        runtime: PhpRuntime,
+        script_filename: &str,
+        document_root: &str,
+        count: usize,
+    ) -> Result<Self> {
+        if count == 0 {
+            return Err(PhpError::NoWorkers);
         }
-
-        let mut workers = Vec::with_capacity(num_workers);
-
-        for _ in 0..num_workers {
-            let worker = WorkerThread::new(
-                script_filename.to_string(),
-                document_root.to_string(),
-            );
-            workers.push(worker);
-        }
-
-        // Give workers time to start up
-        std::thread::sleep(std::time::Duration::from_millis(100));
-
-        Ok(Self {
-            workers,
+        let mut handle = std::ptr::null_mut();
+        // SAFETY: output points to valid writable storage.
+        let status = unsafe { (runtime.inner.api().worker_create)(&mut handle) };
+        runtime.inner.check(status)?;
+        let handle = NonNull::new(handle).ok_or(PhpError::InvalidApi)?;
+        let runtime = Arc::new(WorkerRuntimeHandle { runtime, handle });
+        let mut pool = Self {
+            runtime,
+            workers: Vec::new(),
             next_worker: AtomicUsize::new(0),
             script_filename: script_filename.to_string(),
             document_root: document_root.to_string(),
-            num_workers,
-        })
+            count,
+        };
+        pool.start_workers();
+        Ok(pool)
     }
 
-    /// Restart all workers (used for hot reloading on file changes)
-    pub fn restart(&mut self) {
-        eprintln!("Restarting {} workers...", self.num_workers);
-
-        // Shutdown existing workers
-        for worker in self.workers.drain(..) {
-            worker.shutdown_and_join();
-        }
-
-        // Create new workers
-        for _ in 0..self.num_workers {
-            let worker = WorkerThread::new(
+    fn start_workers(&mut self) {
+        for _ in 0..self.count {
+            self.workers.push(WorkerThread::spawn(
+                self.runtime.clone(),
                 self.script_filename.clone(),
                 self.document_root.clone(),
-            );
-            self.workers.push(worker);
+            ));
         }
-
-        // Give workers time to start up
-        std::thread::sleep(std::time::Duration::from_millis(100));
-
-        eprintln!("Workers restarted.");
     }
 
-    /// Handle an HTTP request using an available worker
-    pub fn handle_request(&self, request: HttpRequest) -> Result<HttpResponse> {
-        // Simple round-robin selection
-        let start = self.next_worker.fetch_add(1, Ordering::SeqCst) % self.workers.len();
+    pub fn restart(&mut self) {
+        for worker in self.workers.drain(..) {
+            worker.join();
+        }
+        self.start_workers();
+    }
 
-        // Try to find an available worker, starting from the round-robin position
-        for i in 0..self.workers.len() {
-            let idx = (start + i) % self.workers.len();
-            if self.workers[idx].is_available() {
-                return self.workers[idx].submit_request(request);
+    pub fn handle_request(&self, request: HttpRequest) -> Result<HttpResponse> {
+        let start = self.next_worker.fetch_add(1, Ordering::SeqCst) % self.workers.len();
+        for offset in 0..self.workers.len() {
+            let index = (start + offset) % self.workers.len();
+            if self.workers[index].is_available() {
+                return self.workers[index].submit(request);
             }
         }
-
-        // All workers busy, use the round-robin one anyway (it will block)
-        self.workers[start % self.workers.len()].submit_request(request)
+        self.workers[start].submit(request)
     }
 }
 
-impl Drop for PhpWorker {
+impl Drop for WorkerPool {
     fn drop(&mut self) {
-        // Workers will be shut down when dropped
+        for worker in self.workers.drain(..) {
+            worker.join();
+        }
+    }
+}
+
+pub const fn runtime_target() -> &'static str {
+    if cfg!(all(target_arch = "x86_64", target_env = "musl")) {
+        "x86_64-unknown-linux-musl"
+    } else if cfg!(all(target_arch = "aarch64", target_env = "musl")) {
+        "aarch64-unknown-linux-musl"
+    } else if cfg!(target_arch = "x86_64") {
+        "x86_64-unknown-linux-gnu"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64-unknown-linux-gnu"
+    } else {
+        "unsupported"
     }
 }
 
@@ -1052,9 +942,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_version() {
-        let version = Php::version();
-        assert!(version.version_id > 0);
-        assert!(version.major >= 8);
+    fn derives_php_version_components() {
+        let id = 80509;
+        assert_eq!((id / 10_000, (id / 100) % 100, id % 100), (8, 5, 9));
+    }
+
+    #[test]
+    fn target_is_supported_in_ci() {
+        assert_ne!(runtime_target(), "unsupported");
     }
 }

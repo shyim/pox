@@ -1,13 +1,12 @@
 //! Riff integration for Composer-compatible package management.
 
-use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use pox_embed::Php;
+use pox_embed::PhpRuntime;
 use riff::CommandContext;
 use riff_core::{
     Output, OutputEvent, OutputOptions, OutputSink, OutputStream, Platform, PlatformSnapshot,
@@ -24,7 +23,7 @@ pub fn should_delegate(arguments: &[OsString]) -> bool {
     if first == "pm" || first == "completion" || first.starts_with("__complete") {
         return true;
     }
-    if first == "server" || matches!(first.as_ref(), "-h" | "--help") {
+    if first == "server" || first == "php" || matches!(first.as_ref(), "-h" | "--help") {
         return false;
     }
     if is_php_option(&first) {
@@ -38,7 +37,7 @@ pub fn should_delegate(arguments: &[OsString]) -> bool {
 }
 
 /// Execute raw Riff arguments using platform facts from the embedded PHP runtime.
-pub fn execute(arguments: Vec<OsString>) -> Result<i32> {
+pub fn execute(arguments: Vec<OsString>, php: &PhpRuntime) -> Result<i32> {
     let arguments = normalize_arguments(arguments);
     let completion = is_completion_invocation(&arguments);
     let capture = completion.then(|| Arc::new(EventCollector::default()));
@@ -46,7 +45,8 @@ pub fn execute(arguments: Vec<OsString>) -> Result<i32> {
         || Output::process(OutputOptions::default()),
         |capture| Output::from_sink(capture.clone()),
     );
-    let context = CommandContext::new(runtime_context()?, embedded_platform()?).with_output(output);
+    let context =
+        CommandContext::new(runtime_context()?, embedded_platform(php)).with_output(output);
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -77,40 +77,31 @@ fn runtime_context() -> Result<RuntimeContext> {
     Ok(RuntimeContext::new(executable.clone(), executable))
 }
 
-fn embedded_platform() -> Result<Platform> {
-    let version = Php::version();
-    let extensions = Php::get_loaded_extensions()?
-        .into_iter()
+fn embedded_platform(php: &PhpRuntime) -> Platform {
+    let version = php.version();
+    let metadata = php.metadata();
+    let extensions = metadata
+        .extensions
+        .iter()
         .map(|extension| (extension.to_ascii_lowercase(), version.version.to_string()))
         .collect();
-    let mut libraries = BTreeMap::new();
-    insert_library(&mut libraries, "icu", Php::icu_version());
-    insert_library(&mut libraries, "libxml", Php::libxml_version());
-    insert_library(
-        &mut libraries,
-        "openssl",
-        Php::openssl_version().and_then(openssl_version),
-    );
-    insert_library(&mut libraries, "pcre", Php::pcre_version());
-    insert_library(&mut libraries, "zlib", Php::zlib_version());
-    insert_library(&mut libraries, "curl", Php::curl_version());
+    let mut libraries = metadata.libraries.clone();
+    if let Some(openssl) = libraries.get_mut("openssl") {
+        if let Some(version) = openssl_version(openssl) {
+            *openssl = version.to_string();
+        }
+    }
 
-    Ok(Platform::from_snapshot(PlatformSnapshot {
+    Platform::from_snapshot(PlatformSnapshot {
         php_version: version.version.to_string(),
         php_version_id: version.version_id as u64,
         int_size: std::mem::size_of::<isize>() as u64,
-        zts: Php::is_zts(),
-        debug: Php::is_debug(),
+        zts: metadata.zts,
+        debug: metadata.debug,
         ipv6: true,
         extensions,
         libraries,
-    }))
-}
-
-fn insert_library(libraries: &mut BTreeMap<String, String>, name: &str, version: Option<&str>) {
-    if let Some(version) = version.filter(|version| !version.is_empty()) {
-        libraries.insert(name.to_string(), version.to_string());
-    }
+    })
 }
 
 fn openssl_version(version: &str) -> Option<&str> {
@@ -249,6 +240,7 @@ mod tests {
     fn keeps_php_and_server_invocations_native() {
         for values in [
             &["server"][..],
+            &["php", "list"],
             &["-r", "echo 1;"],
             &["-d", "memory_limit=1G", "script.php"],
             &["script.php"],

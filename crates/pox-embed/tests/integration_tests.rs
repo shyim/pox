@@ -1,3 +1,5 @@
+#![cfg(feature = "runtime-integration")]
+
 //! Integration tests for pox-embed crate
 //!
 //! Note: These tests must be run sequentially (not in parallel) because
@@ -6,7 +8,7 @@
 //! cargo test -- --test-threads=1
 //! ```
 
-use pox_embed::{Php, PhpVersion};
+use pox_embed::PhpRuntime;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -18,9 +20,15 @@ fn create_php_file(content: &str) -> NamedTempFile {
     file
 }
 
+fn runtime() -> PhpRuntime {
+    let path = std::env::var_os("POX_PHP_RUNTIME")
+        .expect("POX_PHP_RUNTIME must point to a test libpox_php.so");
+    PhpRuntime::load(path).expect("load test PHP runtime")
+}
+
 #[test]
 fn test_version_info() {
-    let version = Php::version();
+    let version = runtime().version();
 
     // Version ID should be a positive number
     assert!(version.version_id > 0, "Version ID should be positive");
@@ -29,7 +37,10 @@ fn test_version_info() {
     assert!(version.major >= 8, "Major version should be at least 8");
 
     // Version string should not be empty
-    assert!(!version.version.is_empty(), "Version string should not be empty");
+    assert!(
+        !version.version.is_empty(),
+        "Version string should not be empty"
+    );
 
     // Zend version should not be empty
     assert!(
@@ -47,7 +58,7 @@ fn test_version_info() {
 
 #[test]
 fn test_version_display() {
-    let version = Php::version();
+    let version = runtime().version();
     let display = format!("{}", version);
 
     // Display should equal the version string
@@ -57,7 +68,7 @@ fn test_version_display() {
 #[test]
 fn test_execute_code_simple() {
     // Simple echo test - exit code should be 0
-    let result = Php::execute_code("echo 'test';", &[] as &[&str]);
+    let result = runtime().execute_code("echo 'test';", &[] as &[&str]);
     assert!(result.is_ok(), "execute_code should succeed");
     assert_eq!(result.unwrap(), 0, "Exit code should be 0");
 }
@@ -65,7 +76,7 @@ fn test_execute_code_simple() {
 #[test]
 fn test_execute_code_with_exit() {
     // Test explicit exit code
-    let result = Php::execute_code("exit(42);", &[] as &[&str]);
+    let result = runtime().execute_code("exit(42);", &[] as &[&str]);
     assert!(result.is_ok(), "execute_code should succeed");
     assert_eq!(result.unwrap(), 42, "Exit code should be 42");
 }
@@ -73,7 +84,7 @@ fn test_execute_code_with_exit() {
 #[test]
 fn test_execute_code_with_args() {
     // Test that args are available in $argv
-    let result = Php::execute_code(
+    let result = runtime().execute_code(
         r#"
         if ($argv[1] === 'arg1' && $argv[2] === 'arg2') {
             exit(0);
@@ -91,7 +102,7 @@ fn test_execute_script_simple() {
     let file = create_php_file("<?php echo 'hello'; exit(0);");
     let path = file.path().to_str().unwrap();
 
-    let result = Php::execute_script(path, &[] as &[&str]);
+    let result = runtime().execute_script(path, &[] as &[&str]);
     assert!(result.is_ok(), "execute_script should succeed");
     assert_eq!(result.unwrap(), 0, "Exit code should be 0");
 }
@@ -101,7 +112,7 @@ fn test_execute_script_with_exit_code() {
     let file = create_php_file("<?php exit(123);");
     let path = file.path().to_str().unwrap();
 
-    let result = Php::execute_script(path, &[] as &[&str]);
+    let result = runtime().execute_script(path, &[] as &[&str]);
     assert!(result.is_ok(), "execute_script should succeed");
     assert_eq!(result.unwrap(), 123, "Exit code should be 123");
 }
@@ -119,7 +130,7 @@ fn test_execute_script_with_args() {
     );
     let path = file.path().to_str().unwrap();
 
-    let result = Php::execute_script(path, &["foo", "bar"]);
+    let result = runtime().execute_script(path, &["foo", "bar"]);
     assert!(result.is_ok(), "execute_script should succeed");
     assert_eq!(result.unwrap(), 0, "Script args should be passed correctly");
 }
@@ -135,7 +146,7 @@ exit(0);
     );
     let path = file.path().to_str().unwrap();
 
-    let result = Php::execute_script(path, &[] as &[&str]);
+    let result = runtime().execute_script(path, &[] as &[&str]);
     assert!(result.is_ok(), "execute_script should handle shebang");
     assert_eq!(result.unwrap(), 0, "Exit code should be 0");
 }
@@ -152,7 +163,7 @@ fn test_lint_valid_syntax() {
     );
     let path = file.path().to_str().unwrap();
 
-    let result = Php::lint(path);
+    let result = runtime().lint(path, &[] as &[&str]);
     assert!(result.is_ok(), "lint should succeed");
     assert_eq!(result.unwrap(), 0, "Valid syntax should return 0");
 }
@@ -166,8 +177,11 @@ fn test_lint_invalid_syntax() {
     );
     let path = file.path().to_str().unwrap();
 
-    let result = Php::lint(path);
-    assert!(result.is_ok(), "lint should succeed even for invalid syntax");
+    let result = runtime().lint(path, &[] as &[&str]);
+    assert!(
+        result.is_ok(),
+        "lint should succeed even for invalid syntax"
+    );
     assert_ne!(result.unwrap(), 0, "Invalid syntax should return non-zero");
 }
 
@@ -181,7 +195,7 @@ fn test_lint_missing_semicolon() {
     );
     let path = file.path().to_str().unwrap();
 
-    let result = Php::lint(path);
+    let result = runtime().lint(path, &[] as &[&str]);
     assert!(result.is_ok(), "lint should succeed");
     assert_ne!(result.unwrap(), 0, "Missing semicolon should be caught");
 }
@@ -189,7 +203,7 @@ fn test_lint_missing_semicolon() {
 #[test]
 fn test_print_modules() {
     // This just tests that print_modules doesn't crash
-    let result = Php::print_modules();
+    let result = runtime().print_modules();
     assert!(result.is_ok(), "print_modules should succeed");
     assert_eq!(result.unwrap(), 0, "Exit code should be 0");
 }
@@ -197,7 +211,7 @@ fn test_print_modules() {
 #[test]
 fn test_info() {
     // This just tests that info doesn't crash
-    let result = Php::info(None);
+    let result = runtime().info(None);
     assert!(result.is_ok(), "info should succeed");
     assert_eq!(result.unwrap(), 0, "Exit code should be 0");
 }
@@ -205,11 +219,12 @@ fn test_info() {
 #[test]
 fn test_set_ini_entries() {
     // Test setting INI entries
-    let result = Php::set_ini_entries(Some("memory_limit=256M\n"));
+    let php = runtime();
+    let result = php.set_ini_entries(Some("memory_limit=256M\n"));
     assert!(result.is_ok(), "set_ini_entries should succeed");
 
     // Verify the INI was set
-    let result = Php::execute_code(
+    let result = php.execute_code(
         r#"
         $limit = ini_get('memory_limit');
         exit($limit === '256M' ? 0 : 1);
@@ -220,15 +235,16 @@ fn test_set_ini_entries() {
     assert_eq!(result.unwrap(), 0, "INI entry should be set correctly");
 
     // Clear INI entries for subsequent tests
-    let _ = Php::set_ini_entries(None);
+    let _ = php.set_ini_entries(None);
 }
 
 #[test]
 fn test_set_multiple_ini_entries() {
-    let result = Php::set_ini_entries(Some("error_reporting=0\ndisplay_errors=Off\n"));
+    let php = runtime();
+    let result = php.set_ini_entries(Some("error_reporting=0\ndisplay_errors=Off\n"));
     assert!(result.is_ok(), "set_ini_entries should succeed");
 
-    let result = Php::execute_code(
+    let result = php.execute_code(
         r#"
         $er = ini_get('error_reporting');
         $de = ini_get('display_errors');
@@ -240,19 +256,22 @@ fn test_set_multiple_ini_entries() {
     assert_eq!(result.unwrap(), 0, "Multiple INI entries should be set");
 
     // Clear INI entries
-    let _ = Php::set_ini_entries(None);
+    let _ = php.set_ini_entries(None);
 }
 
 #[test]
 fn test_execute_code_invalid_string() {
     // Test that null bytes in code are handled
-    let result = Php::execute_code("echo 'test\0null';", &[] as &[&str]);
-    assert!(result.is_err(), "Null byte in code should cause error");
+    let result = runtime().execute_code("echo 'test\0null';", &[] as &[&str]);
+    assert!(
+        result.is_err(),
+        "embedded null bytes must be rejected safely"
+    );
 }
 
 #[test]
 fn test_execute_script_nonexistent() {
-    let result = Php::execute_script("/nonexistent/path/to/script.php", &[] as &[&str]);
+    let result = runtime().execute_script("/nonexistent/path/to/script.php", &[] as &[&str]);
     // PHP should return an error for non-existent files
     assert!(result.is_ok(), "execute_script should not panic");
     // The exit code will be non-zero due to the file not existing
@@ -260,7 +279,7 @@ fn test_execute_script_nonexistent() {
 
 #[test]
 fn test_php_version_struct() {
-    let v = PhpVersion::get();
+    let v = runtime().version();
 
     // Test the get() method directly
     assert!(v.version_id > 0);
@@ -272,7 +291,7 @@ fn test_php_version_struct() {
 #[test]
 fn test_execute_code_php_error() {
     // Test PHP runtime error handling
-    let result = Php::execute_code(
+    let result = runtime().execute_code(
         r#"
         // This will cause an error but not crash
         trigger_error('test error', E_USER_WARNING);
@@ -299,14 +318,14 @@ fn test_server_variables() {
     );
     let path = file.path().to_str().unwrap();
 
-    let result = Php::execute_script(path, &[] as &[&str]);
+    let result = runtime().execute_script(path, &[] as &[&str]);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 0, "Server variables should be set");
 }
 
 #[test]
 fn test_stdin_stdout_stderr_constants() {
-    let result = Php::execute_code(
+    let result = runtime().execute_code(
         r#"
         // Check that STDIN, STDOUT, STDERR constants exist
         if (!defined('STDIN') || !defined('STDOUT') || !defined('STDERR')) {

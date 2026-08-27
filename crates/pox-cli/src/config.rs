@@ -18,13 +18,16 @@ pub struct PoxConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct PhpConfig {
+    /// Exact PHP patch version selected for this project.
+    pub version: Option<String>,
+
     /// PHP INI settings (e.g., memory_limit = "256M")
     #[serde(default)]
     pub ini: HashMap<String, String>,
 }
 
 /// Development server configuration
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct ServerConfig {
     /// Host to bind to
@@ -48,20 +51,6 @@ pub struct ServerConfig {
     /// Watch patterns for file changes
     #[serde(default)]
     pub watch: Vec<String>,
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            host: None,
-            port: None,
-            document_root: None,
-            router: None,
-            worker: None,
-            workers: None,
-            watch: Vec::new(),
-        }
-    }
 }
 
 impl PoxConfig {
@@ -100,6 +89,7 @@ mod tests {
     #[test]
     fn test_parse_empty_config() {
         let config: PoxConfig = toml::from_str("").unwrap();
+        assert!(config.php.version.is_none());
         assert!(config.php.ini.is_empty());
     }
 
@@ -112,9 +102,24 @@ max_execution_time = "30"
 display_errors = "On"
 "#;
         let config: PoxConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.php.ini.get("memory_limit"), Some(&"256M".to_string()));
-        assert_eq!(config.php.ini.get("max_execution_time"), Some(&"30".to_string()));
-        assert_eq!(config.php.ini.get("display_errors"), Some(&"On".to_string()));
+        assert_eq!(
+            config.php.ini.get("memory_limit"),
+            Some(&"256M".to_string())
+        );
+        assert_eq!(
+            config.php.ini.get("max_execution_time"),
+            Some(&"30".to_string())
+        );
+        assert_eq!(
+            config.php.ini.get("display_errors"),
+            Some(&"On".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_php_version() {
+        let config: PoxConfig = toml::from_str("[php]\nversion = \"8.5.9\"\n").unwrap();
+        assert_eq!(config.php.version.as_deref(), Some("8.5.9"));
     }
 
     #[test]
@@ -138,5 +143,4 @@ watch = ["**/*.php", "config/**/*"]
         assert_eq!(config.server.workers, Some(4));
         assert_eq!(config.server.watch, vec!["**/*.php", "config/**/*"]);
     }
-
 }

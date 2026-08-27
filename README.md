@@ -1,244 +1,205 @@
 <p align="center">
-  <img src=".github/logo.png" alt="PHPox Logo" width="200">
+  <img src=".github/logo.png" alt="Pox logo" width="180">
 </p>
 
-<h1 align="center">PHPox</h1>
+<h1 align="center">Pox</h1>
 
 <p align="center">
-  <strong>An all-in-one PHP distribution for modern development</strong>
+  A fast PHP runtime manager, development server, and Composer-compatible
+  package manager in one Rust CLI.
 </p>
 
-<p align="center">
-  A single binary that includes PHP runtime, web server, package manager, and all common extensions.<br>
-  No more juggling multiple tools or fighting with PHP installations.
-</p>
+Pox and PHP are versioned independently. The `pox` executable contains the
+server and [Riff](https://github.com/shyim/riff) package manager, while PHP is a
+separately installed ZTS runtime loaded through a stable Pox ABI. Updating Pox
+does not silently replace PHP, and changing PHP does not require rebuilding
+Pox.
 
----
+## Highlights
 
-## Features
+- **PHP version management** — Install, pin, inspect, and remove PHP 8.4/8.5
+  runtimes per project or globally.
+- **Stable runtime boundary** — PHP and Zend internals stay inside a
+  self-contained `libpox_php.so`; Rust uses opaque handles and owned values.
+- **Verified downloads** — Release metadata is signed with Ed25519 and every
+  runtime archive and library is checked with SHA-256.
+- **Development server** — Standard request mode, long-running worker mode,
+  and file-watching restarts.
+- **Riff package manager** — Read and write Composer projects without invoking
+  PHP or Composer as subprocesses.
 
-- **Single Binary** — One download, everything included. No dependencies, no setup.
-- **Integrated Web Server** — Development server with worker mode (like FrankenPHP) and file watching.
-- **Riff Package Manager** — Composer-compatible package management powered by [Riff](https://github.com/shyim/riff).
-- **All Extensions Included** — Common extensions pre-compiled and ready to use.
-- **Project Configuration** — Simple `pox.toml` file for PHP settings and server config.
+## Getting started
 
-## Quick Start
-
-```bash
-# Run a PHP script
-pox script.php
-
-# Start development server
-pox server
-
-# Install dependencies (reads composer.json)
-pox install
-
-# Add a package
-pox add vendor/package
-```
-
-## Installation
-
-### Download Binary
-
-[Each pipeline run includes as artifact a prebuilt binary for your platform.]()
-
-### Build from Source
+Build Pox, install a runtime, and select it globally:
 
 ```bash
 git clone https://github.com/shyim/pox
 cd pox
-cargo build --release
+mise install
+mise run build
+
+./target/debug/pox php install 8.5
+./target/debug/pox php use 8.5 --global
+./target/debug/pox -v
 ```
 
-Requires a PHP installation compiled with embed SAPI (`--enable-embed`). Set `PHP_CONFIG` environment variable to point to your PHP installation.
-
-## CLI Reference
-
-```
-pox 0.1.0 - PHP embedded in Rust
-
-Usage: pox [options] <file> [args...]
-       pox [options] -r <code> [args...]
-       pox <command> [options]
-
-Options:
-  -d key[=value]  Define INI entry
-  -i              Show PHP info
-  -l              Syntax check (lint)
-  -m              Show compiled modules
-  -r <code>       Run PHP code
-  -v              Version info
-  -h, --help      Show help
-
-Commands:
-  server          Start development server
-  init            Create new composer.json
-  install         Install dependencies
-  update          Update dependencies
-  require, add    Add a package
-  remove          Remove a package
-  run             Run composer script
-  pm              Compatibility prefix for package manager commands
-  validate        Validate composer.json and composer.lock
-  status          Show locally modified dependencies
-  completion      Generate shell completion scripts
-```
-
-### Package Manager Commands
+Pin the exact installed patch in a project:
 
 ```bash
-pox pm show              # Show package info
-pox pm search <query>    # Search Packagist
-pox pm outdated          # List outdated packages
-pox pm audit             # Security vulnerability check
-pox pm why <package>     # Show why package is installed
-pox pm dump-autoload     # Regenerate autoloader
-pox pm exec <binary>     # Run vendored binary
-pox pm clear-cache       # Clear package cache
+cd my-project
+pox php use 8.5
+pox install
+pox server --document-root public
 ```
 
-## Configuration
+`pox php use 8.5` resolves the newest installed matching patch and writes the
+exact version to `pox.toml`, keeping project selection reproducible. Normal PHP,
+server, and package-manager commands never download a missing runtime; their
+error tells you which explicit install command to run.
 
-Create a `pox.toml` in your project root:
+## PHP runtime management
+
+```text
+pox php install <version> [--force]  Download a signed exact or series match
+pox php use <version> [--global]     Pin an installed runtime
+pox php list [--remote]              List installed or available releases
+pox php current                      Show version, target, ABI, and library
+pox php remove <version> [--force]   Remove an installed runtime
+```
+
+Runtime selection precedence is:
+
+1. `POX_PHP_RUNTIME`, an explicit library path for runtime development
+2. `POX_PHP_VERSION`
+3. The nearest `pox.toml` while walking up from the current directory
+4. The global Pox configuration
+
+Pox follows XDG paths. Runtimes live below
+`$XDG_DATA_HOME/pox/runtimes`, downloads below `$XDG_CACHE_HOME/pox`, and the
+global selection in `$XDG_CONFIG_HOME/pox/config.toml`.
+
+Runtime artifacts are published by
+[`shyim/pox-runtime`](https://github.com/shyim/pox-runtime) for Linux glibc and
+musl on x86_64 and aarch64. A Pox binary and runtime must use the same libc and
+architecture.
+
+## PHP CLI
+
+Pox preserves the familiar PHP CLI forms:
+
+```bash
+pox script.php arg1 arg2
+pox -r 'echo PHP_VERSION;'
+pox -l script.php
+pox -m
+pox -i
+pox -d memory_limit=512M script.php
+pox -v
+```
+
+## Project configuration
+
+Create `pox.toml` in the project root:
 
 ```toml
-# PHP runtime settings
+[php]
+version = "8.5.9"
+
 [php.ini]
 memory_limit = "256M"
 display_errors = "On"
 error_reporting = "E_ALL"
 
-# Development server
 [server]
 host = "0.0.0.0"
 port = 8080
 document_root = "public"
 router = "index.php"
-
-# Worker mode (optional)
 # worker = "worker.php"
 # workers = 4
 # watch = ["**/*.php"]
 ```
 
-### Configuration Priority
+CLI `-d` values override `pox.toml` INI settings.
 
-1. CLI arguments (`-d memory_limit=512M`)
-2. `pox.toml` settings
-3. Built-in defaults
-
-## Web Server
-
-### Standard Mode
+## Development server
 
 ```bash
 pox server
 pox server --port 8080 --document-root public
-pox server public/index.php  # With router script
+pox server --document-root public public/index.php
+pox server --worker worker.php --workers 4 --watch '**/*.php'
 ```
 
-### Worker Mode
+Worker scripts use the `pox_handle_request()` function supplied by the runtime:
 
-Long-running PHP processes for better performance (similar to FrankenPHP):
+```php
+<?php
 
-```bash
-pox server --worker worker.php --workers 4
+while (pox_handle_request(function (): void {
+    echo 'Hello from a persistent PHP worker';
+})) {
+}
 ```
 
-### File Watching
+## Package management
 
-Auto-restart workers when files change:
-
-```bash
-pox server --worker worker.php --watch "**/*.php"
-```
-
-## Package Manager
-
-PHPox embeds [Riff](https://github.com/shyim/riff), a Composer-compatible package manager written in Rust. It reads and writes standard `composer.json` and `composer.lock` files without requiring a separate Composer installation.
+Package commands are powered by Riff and consume platform facts reported by
+the selected PHP runtime:
 
 ```bash
-# Initialize new project
 pox init
-
-# Install from lock file
 pox install
-
-# Update dependencies
 pox update
-
-# Add packages
-pox add laravel/framework
-pox add --dev phpunit/phpunit
-
-# Remove packages
+pox add vendor/package
 pox remove vendor/package
-
-# Use the wider Riff command surface
-pox validate --strict
+pox show vendor/package
 pox check-platform-reqs --lock
 pox audit --locked
 ```
 
-Riff commands are available directly and through the compatibility prefix, so
-`pox show` and `pox pm show` are equivalent. Run `pox <command> --help` for the
-complete arguments supported by a command.
-
-Package resolution uses facts supplied by Pox's embedded PHP runtime. Composer
-scripts using `@php` and `@composer` are routed back through the current `pox`
-binary, preserving the single-binary workflow. An explicit Riff `--php` option
-overrides only the executable used by child scripts; it does not change the
-platform used for dependency resolution.
-
-### Supported Features
-
-- Full dependency resolution (SAT solver)
-- PSR-0, PSR-4, classmap, and files autoloading
-- Private repositories and authentication
-- Platform requirements checking
-- Lock file compatibility with Composer
-- Native package patches and supported Composer plugin adapters
-- Symfony Flex recipes and dependency policies
-
-Riff cannot execute arbitrary Composer PHP plugins inside its Rust process.
-Unsupported enabled plugins fail with an actionable error; see Riff's
-[compatibility guide](https://github.com/shyim/riff/blob/main/docs/compatibility.md)
-before replacing Composer in an existing deployment workflow.
+The compatibility prefix remains available, so `pox show` and `pox pm show`
+are equivalent. Composer script references to `@php` and `@composer` route back
+through the active Pox executable. Riff cannot execute arbitrary Composer PHP
+plugins inside its Rust process; see its
+[compatibility guide](https://github.com/shyim/riff/blob/main/docs/compatibility.md).
 
 ## Architecture
 
-PHPox is built as a Rust workspace with these crates:
+| Component | Responsibility |
+| --- | --- |
+| `pox-cli` | Runtime manager, PHP-compatible CLI, server, and Riff routing |
+| `pox-embed` | Safe dynamic loader and owned CLI/web/worker Rust APIs |
+| `libpox_php.so` | Versioned ABI adapter, PHP/Zend internals, and native libraries |
+| `pox-runtime` | PHP 8.4/8.5 builds, signed release index, and target artifacts |
 
-| Crate | Description |
-|-------|-------------|
-| `pox-cli` | Main CLI binary, web server, command handling |
-| `pox-embed` | FFI bindings to PHP's embed SAPI |
-| `riff` / `riff-core` | Composer-compatible package management, fetched from GitHub at a pinned revision |
+The shared library exports only `pox_php_get_api`. ABI major versions are
+breaking; minor versions only append capabilities. PHP request structures,
+Zend types, allocators, and SAPI state never cross into Rust.
 
-## Contributing
+## Developing Pox and the runtime
 
-Contributions welcome. Package-manager behavior is implemented upstream in
-[Riff](https://github.com/shyim/riff); Pox owns the embedded platform bridge,
-command routing, PHP runtime, and server integration.
+Pox itself builds without PHP headers or `php-config`:
 
 ```bash
-# Build
-cargo build
-
-# Run tests
-cargo test
-
-# Run CLI tests
-cargo test -p pox-cli
+mise install
+mise run check
+mise run test
 ```
 
-The Riff source dependency is pinned to Git revision
-`96879c9cb48f6ed9620d6ab634fdf79b6f3e8e6b` for reproducible builds and is
-updated intentionally through `Cargo.toml` and `Cargo.lock`.
+For real PHP integration tests, keep `pox-runtime` next to this checkout:
+
+```bash
+git clone https://github.com/shyim/pox-runtime ../pox-runtime
+mise run runtime:build
+mise run test:runtime
+```
+
+The runtime helper reuses `pox-php-config` when available; otherwise the runtime
+repository builds ZTS/embed PHP through static-php-cli. The Riff dependency is
+pinned to an exact Git revision in `Cargo.toml` and `Cargo.lock`.
 
 ## License
 
-MIT
+Pox is MIT licensed. Downloadable runtime archives include the applicable PHP
+and native dependency license notices.

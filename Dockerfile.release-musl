@@ -1,0 +1,13 @@
+# syntax=docker/dockerfile:1
+FROM rust:1.98-alpine3.22 AS builder
+RUN apk add --no-cache build-base ca-certificates cmake git musl-dev perl pkgconf
+WORKDIR /work
+COPY . .
+ARG TARGET
+ENV RUSTFLAGS="-C target-feature=-crt-static"
+RUN rustup target add "${TARGET}"
+RUN cargo build --release --locked --target "${TARGET}"
+RUN cp "target/${TARGET}/release/pox" /pox
+
+FROM scratch
+COPY --from=builder /pox /pox

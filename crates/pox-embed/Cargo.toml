@@ -1,20 +1,18 @@
 [package]
 name = "pox-embed"
-description = "Rust bindings to embed PHP via the PHP embed SAPI"
+description = "Safe loader for independently distributed Pox PHP runtimes"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-build = "build.rs"
 
 [features]
-default = []
-static = []  # Force static linking against libphp.a
+runtime-integration = []
 
 [dependencies]
+libloading = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "2"
 
 [dev-dependencies]
 tempfile = "3"
-
-[build-dependencies]
-cc = "1"

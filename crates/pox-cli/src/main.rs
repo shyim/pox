@@ -1,26 +1,30 @@
 mod config;
 mod package_manager;
+mod runtime_manager;
 
 use config::PoxConfig;
+use runtime_manager::RuntimeManager;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use pox_embed::{HttpRequest, Php, PhpWeb, PhpWorker};
-use std::path::{Path, PathBuf};
-use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
-use tiny_http::{Header, Response, Server, StatusCode};
+use globset::{Glob, GlobSetBuilder};
 use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebouncedEvent};
-use globset::{Glob, GlobSetBuilder};
+use pox_embed::{HttpRequest, PhpRuntime};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tiny_http::{Header, Response, Server, StatusCode};
 
 #[derive(Parser, Debug)]
 #[command(name = "pox")]
-#[command(about = "PHP CLI embedded in Rust")]
+#[command(about = "PHP runtime manager, development server, and package manager")]
 #[command(disable_version_flag = true)]
-#[command(after_help = "Package management is powered by Riff. Run 'pox <command> --help' for command-specific help.\n\nCommon package-manager commands:\n  init, create-project, install, update, require, add, remove, run\n  show, search, outdated, audit, validate, status, check-platform-reqs\n\nThe compatibility form 'pox pm <command>' is also supported.\nSee 'php --help' for the original PHP CLI help.")]
+#[command(
+    after_help = "PHP runtimes are managed with 'pox php'. Package management is powered by Riff.\nRun 'pox <command> --help' for command-specific help.\n\nCommon package-manager commands:\n  init, create-project, install, update, require, add, remove, run\n  show, search, outdated, audit, validate, status, check-platform-reqs\n\nThe compatibility form 'pox pm <command>' is also supported."
+)]
 #[command(args_conflicts_with_subcommands = true)]
 struct Args {
     #[command(subcommand)]
@@ -51,12 +55,22 @@ struct Args {
     define: Vec<String>,
 
     /// PHP script to execute and its arguments
-    #[arg(value_name = "FILE", trailing_var_arg = true, allow_hyphen_values = true)]
+    #[arg(
+        value_name = "FILE",
+        trailing_var_arg = true,
+        allow_hyphen_values = true
+    )]
     script_and_args: Vec<String>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Install and select independently versioned PHP runtimes
+    Php {
+        #[command(subcommand)]
+        command: PhpCommands,
+    },
+
     /// Start a PHP development server
     Server {
         /// Address to listen on
@@ -87,14 +101,91 @@ enum Commands {
         #[arg(long, action = clap::ArgAction::Append)]
         watch: Vec<String>,
     },
-
 }
 
-fn print_version() {
-    let v = Php::version();
-    println!("PHP {} (cli) (built: embedded)", v.version);
+#[derive(Subcommand, Debug)]
+enum PhpCommands {
+    /// Download and install a signed PHP runtime
+    Install {
+        /// Exact version or release series, such as 8.5 or 8.5.9
+        version: String,
+        /// Replace an existing installation
+        #[arg(long)]
+        force: bool,
+    },
+    /// Select an installed PHP runtime
+    Use {
+        /// Exact version or installed release series
+        version: String,
+        /// Set the fallback outside projects
+        #[arg(long)]
+        global: bool,
+    },
+    /// List installed or remotely available runtimes
+    List {
+        /// Read available versions from the signed release index
+        #[arg(long)]
+        remote: bool,
+    },
+    /// Show the selected runtime and ABI details
+    Current,
+    /// Remove an installed runtime
+    Remove {
+        /// Exact version or installed release series
+        version: String,
+        /// Remove even when selected in the current context
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+fn print_version(php: &PhpRuntime) {
+    let v = php.version();
+    println!(
+        "PHP {} (cli) (Pox runtime {})",
+        v.version,
+        php.metadata().runtime_revision
+    );
     println!("Copyright (c) The PHP Group");
     println!("{}", v.zend_version);
+}
+
+fn run_php_manager(manager: &RuntimeManager, command: PhpCommands) -> Result<i32> {
+    match command {
+        PhpCommands::Install { version, force } => {
+            manager.install(&version, force)?;
+        }
+        PhpCommands::Use { version, global } => {
+            manager.use_version(&version, global)?;
+        }
+        PhpCommands::List { remote } => manager.list(remote)?,
+        PhpCommands::Current => {
+            if let Some(path) = std::env::var_os("POX_PHP_RUNTIME") {
+                let php = PhpRuntime::load(&path)?;
+                println!("PHP {}", php.metadata().php_version);
+                println!("Runtime revision: {}", php.metadata().runtime_revision);
+                println!("Target: {}", php.metadata().target);
+                println!(
+                    "ABI: {}.{}",
+                    php.metadata().abi_major,
+                    php.metadata().abi_minor
+                );
+                println!("Library: {}", PathBuf::from(path).display());
+            } else {
+                let installed = manager.current()?;
+                println!("PHP {}", installed.manifest.php_version);
+                println!("Runtime revision: {}", installed.manifest.runtime_revision);
+                println!("Target: {}", installed.manifest.target);
+                println!(
+                    "ABI: {}.{}",
+                    installed.manifest.abi_major, installed.manifest.abi_minor
+                );
+                println!("Library: {}", installed.library_path().display());
+            }
+        }
+        PhpCommands::Remove { version, force } => manager.remove(&version, force)?,
+    }
+    Ok(0)
 }
 
 /// Build INI entries by merging config file and CLI arguments
@@ -134,15 +225,27 @@ fn build_ini_entries(config: Option<&PoxConfig>, defines: &[String]) -> Option<S
     Some(entries.join("\n") + "\n")
 }
 
-fn run_server(host: &str, port: u16, document_root: &Path, router: Option<&Path>, worker: Option<&Path>, num_workers: usize, watch_patterns: Vec<String>, config: Option<&PoxConfig>) -> Result<i32> {
+#[allow(clippy::too_many_arguments)]
+fn run_server(
+    php: &PhpRuntime,
+    host: &str,
+    port: u16,
+    document_root: &Path,
+    router: Option<&Path>,
+    worker: Option<&Path>,
+    num_workers: usize,
+    watch_patterns: Vec<String>,
+    config: Option<&PoxConfig>,
+) -> Result<i32> {
     // Apply INI entries from config for server mode
     let ini_entries = build_ini_entries(config, &[]);
     if ini_entries.is_some() {
-        Php::set_ini_entries(ini_entries.as_deref())?;
+        php.set_ini_entries(ini_entries.as_deref())?;
     }
 
     let addr = format!("{}:{}", host, port);
-    let server = Server::http(&addr).map_err(|e| anyhow::anyhow!("Failed to start server: {}", e))?;
+    let server =
+        Server::http(&addr).map_err(|e| anyhow::anyhow!("Failed to start server: {}", e))?;
 
     let document_root = document_root
         .canonicalize()
@@ -150,7 +253,7 @@ fn run_server(host: &str, port: u16, document_root: &Path, router: Option<&Path>
 
     println!(
         "PHP {} Development Server started at http://{}",
-        Php::version(),
+        php.version(),
         addr
     );
     println!("Document root is {}", document_root.display());
@@ -165,16 +268,31 @@ fn run_server(host: &str, port: u16, document_root: &Path, router: Option<&Path>
         } else {
             num_workers
         };
-        println!("Worker script is {} ({} workers)", worker_script.display(), num_workers);
+        println!(
+            "Worker script is {} ({} workers)",
+            worker_script.display(),
+            num_workers
+        );
         if !watch_patterns.is_empty() {
             println!("Watching for file changes: {:?}", watch_patterns);
         }
-        return run_worker_server(server, host, port, &document_root, worker_script, num_workers, watch_patterns);
+        return run_worker_server(
+            php,
+            server,
+            host,
+            port,
+            &document_root,
+            worker_script,
+            num_workers,
+            watch_patterns,
+        );
     }
     println!("Press Ctrl-C to quit.");
 
     // Initialize PHP web runtime
-    let php = PhpWeb::new().map_err(|e| anyhow::anyhow!("Failed to initialize PHP: {}", e))?;
+    let php = php
+        .web()
+        .map_err(|e| anyhow::anyhow!("Failed to initialize PHP: {}", e))?;
 
     for mut request in server.incoming_requests() {
         let method = request.method().to_string();
@@ -192,7 +310,13 @@ fn run_server(host: &str, port: u16, document_root: &Path, router: Option<&Path>
 
         // Check if the file exists
         if !script_path.exists() || !script_path.is_file() {
-            send_error_response(request, 404, "The requested URL was not found on this server.", &method, &url);
+            send_error_response(
+                request,
+                404,
+                "The requested URL was not found on this server.",
+                &method,
+                &url,
+            );
             continue;
         }
 
@@ -248,20 +372,34 @@ fn resolve_script_path(document_root: &Path, url_path: &str, router: Option<&Pat
     file_path
 }
 
-fn run_worker_server(server: Server, host: &str, port: u16, document_root: &Path, worker_script: &Path, num_workers: usize, watch_patterns: Vec<String>) -> Result<i32> {
+#[allow(clippy::too_many_arguments)]
+fn run_worker_server(
+    php: &PhpRuntime,
+    server: Server,
+    host: &str,
+    port: u16,
+    document_root: &Path,
+    worker_script: &Path,
+    num_workers: usize,
+    watch_patterns: Vec<String>,
+) -> Result<i32> {
     let document_root = document_root.to_path_buf();
-    let worker_script = worker_script.canonicalize()
+    let worker_script = worker_script
+        .canonicalize()
         .map_err(|e| anyhow::anyhow!("Worker script not found: {}", e))?;
     let host = host.to_string();
 
     println!("Press Ctrl-C to quit.");
 
     // Initialize the worker pool (wrapped in Mutex for restart capability)
-    let worker_pool = Arc::new(Mutex::new(PhpWorker::new(
-        worker_script.to_string_lossy().as_ref(),
-        document_root.to_string_lossy().as_ref(),
-        num_workers,
-    ).map_err(|e| anyhow::anyhow!("Failed to initialize PHP worker pool: {}", e))?));
+    let worker_pool = Arc::new(Mutex::new(
+        php.workers(
+            worker_script.to_string_lossy().as_ref(),
+            document_root.to_string_lossy().as_ref(),
+            num_workers,
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to initialize PHP worker pool: {}", e))?,
+    ));
 
     // Set up file watcher if patterns are provided
     let restart_flag = Arc::new(AtomicBool::new(false));
@@ -270,11 +408,15 @@ fn run_worker_server(server: Server, host: &str, port: u16, document_root: &Path
         let mut glob_builder = GlobSetBuilder::new();
         for pattern in &watch_patterns {
             match Glob::new(pattern) {
-                Ok(glob) => { glob_builder.add(glob); }
+                Ok(glob) => {
+                    glob_builder.add(glob);
+                }
                 Err(e) => eprintln!("Invalid glob pattern '{}': {}", pattern, e),
             }
         }
-        let glob_set = glob_builder.build().map_err(|e| anyhow::anyhow!("Failed to build glob set: {}", e))?;
+        let glob_set = glob_builder
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build glob set: {}", e))?;
 
         // Create debounced watcher
         let restart_flag_clone = restart_flag.clone();
@@ -288,10 +430,12 @@ fn run_worker_server(server: Server, host: &str, port: u16, document_root: &Path
                     let _ = tx.send(events);
                 }
             },
-        ).map_err(|e| anyhow::anyhow!("Failed to create file watcher: {}", e))?;
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to create file watcher: {}", e))?;
 
         // Watch the document root recursively
-        debouncer.watch(&document_root, RecursiveMode::Recursive)
+        debouncer
+            .watch(&document_root, RecursiveMode::Recursive)
             .map_err(|e| anyhow::anyhow!("Failed to watch directory: {}", e))?;
 
         // Spawn thread to handle file change events
@@ -403,7 +547,13 @@ fn get_static_file_content(document_root: &Path, path: &str) -> Option<(Vec<u8>,
 }
 
 /// Serve a static file response
-fn serve_static_file(request: tiny_http::Request, content: Vec<u8>, content_type: &str, method: &str, url: &str) {
+fn serve_static_file(
+    request: tiny_http::Request,
+    content: Vec<u8>,
+    content_type: &str,
+    method: &str,
+    url: &str,
+) {
     let mut response = Response::from_data(content);
     if let Some(header) = make_content_type_header(content_type) {
         response = response.with_header(header);
@@ -413,7 +563,9 @@ fn serve_static_file(request: tiny_http::Request, content: Vec<u8>, content_type
 }
 
 /// Extract request metadata from tiny_http::Request
-fn extract_request_metadata(request: &mut tiny_http::Request) -> (Vec<(String, String)>, Vec<u8>, String, u16) {
+fn extract_request_metadata(
+    request: &mut tiny_http::Request,
+) -> (Vec<(String, String)>, Vec<u8>, String, u16) {
     // Read request body
     let mut body = Vec::new();
     if let Err(e) = request.as_reader().read_to_end(&mut body) {
@@ -432,15 +584,13 @@ fn extract_request_metadata(request: &mut tiny_http::Request) -> (Vec<(String, S
         .remote_addr()
         .map(|a| a.ip().to_string())
         .unwrap_or_else(|| "127.0.0.1".to_string());
-    let remote_port = request
-        .remote_addr()
-        .map(|a| a.port())
-        .unwrap_or(0);
+    let remote_port = request.remote_addr().map(|a| a.port()).unwrap_or(0);
 
     (headers, body, remote_addr, remote_port)
 }
 
 /// Build an HttpRequest for PHP
+#[allow(clippy::too_many_arguments)]
 fn build_php_request(
     method: String,
     url: String,
@@ -478,8 +628,8 @@ fn send_php_response(
 ) {
     match result {
         Ok(response) => {
-            let mut http_response = Response::from_data(response.body)
-                .with_status_code(StatusCode(response.status));
+            let mut http_response =
+                Response::from_data(response.body).with_status_code(StatusCode(response.status));
 
             for (key, value) in response.headers {
                 if let Ok(header) = Header::from_bytes(key.as_bytes(), value.as_bytes()) {
@@ -519,8 +669,7 @@ fn send_error_response(
         "<!DOCTYPE html><html><head><title>{}</title></head><body><h1>{}</h1><p>{}</p></body></html>",
         title, heading, message
     );
-    let mut response = Response::from_string(body)
-        .with_status_code(StatusCode(status_code));
+    let mut response = Response::from_string(body).with_status_code(StatusCode(status_code));
     if let Some(header) = make_content_type_header("text/html") {
         response = response.with_header(header);
     }
@@ -533,10 +682,7 @@ fn send_error_response(
 }
 
 fn guess_content_type(path: &Path) -> String {
-    let extension = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     match extension.to_lowercase().as_str() {
         "html" | "htm" => "text/html",
@@ -561,8 +707,10 @@ fn guess_content_type(path: &Path) -> String {
 
 fn run() -> Result<i32> {
     let raw_arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+    let manager = RuntimeManager::new()?;
     if package_manager::should_delegate(&raw_arguments) {
-        return package_manager::execute(raw_arguments);
+        let php = manager.load_selected()?;
+        return package_manager::execute(raw_arguments, &php);
     }
 
     let args = Args::parse();
@@ -573,6 +721,7 @@ fn run() -> Result<i32> {
     // Handle subcommands first
     if let Some(command) = args.command {
         match command {
+            Commands::Php { command } => return run_php_manager(&manager, command),
             Commands::Server {
                 host,
                 port,
@@ -583,32 +732,33 @@ fn run() -> Result<i32> {
                 watch,
             } => {
                 // Merge CLI args with config file settings (CLI takes precedence)
-                let effective_host = config.as_ref()
+                let effective_host = config
+                    .as_ref()
                     .and_then(|c| c.server.host.clone())
                     .unwrap_or(host);
-                let effective_port = config.as_ref()
-                    .and_then(|c| c.server.port)
-                    .unwrap_or(port);
-                let effective_doc_root = config.as_ref()
+                let effective_port = config.as_ref().and_then(|c| c.server.port).unwrap_or(port);
+                let effective_doc_root = config
+                    .as_ref()
                     .and_then(|c| c.server.document_root.as_ref().map(PathBuf::from))
                     .unwrap_or(document_root);
                 let effective_router = router.or_else(|| {
-                    config.as_ref()
+                    config
+                        .as_ref()
                         .and_then(|c| c.server.router.as_ref().map(PathBuf::from))
                 });
                 let effective_worker = worker.or_else(|| {
-                    config.as_ref()
+                    config
+                        .as_ref()
                         .and_then(|c| c.server.worker.as_ref().map(PathBuf::from))
                 });
                 let effective_workers = if workers == 0 {
-                    config.as_ref()
-                        .and_then(|c| c.server.workers)
-                        .unwrap_or(0)
+                    config.as_ref().and_then(|c| c.server.workers).unwrap_or(0)
                 } else {
                     workers
                 };
                 let effective_watch = if watch.is_empty() {
-                    config.as_ref()
+                    config
+                        .as_ref()
                         .map(|c| c.server.watch.clone())
                         .unwrap_or_default()
                 } else {
@@ -616,6 +766,7 @@ fn run() -> Result<i32> {
                 };
 
                 return run_server(
+                    &manager.load_selected()?,
                     &effective_host,
                     effective_port,
                     &effective_doc_root,
@@ -629,26 +780,28 @@ fn run() -> Result<i32> {
         }
     }
 
+    let php = manager.load_selected()?;
+
     // Set INI entries from config file and CLI args
     let ini_entries = build_ini_entries(config.as_ref(), &args.define);
     if ini_entries.is_some() {
-        Php::set_ini_entries(ini_entries.as_deref())?;
+        php.set_ini_entries(ini_entries.as_deref())?;
     }
 
     // Handle -v/--version
     if args.version_flag {
-        print_version();
+        print_version(&php);
         return Ok(0);
     }
 
     // Handle -i/--info (phpinfo)
     if args.info {
-        return Ok(Php::info(None)?);
+        return Ok(php.info(None)?);
     }
 
     // Handle -m/--modules
     if args.modules {
-        return Ok(Php::print_modules()?);
+        return Ok(php.print_modules()?);
     }
 
     // Parse script and args from combined vector
@@ -664,7 +817,7 @@ fn run() -> Result<i32> {
     if args.lint {
         if let Some(ref s) = script {
             let path = s.to_string_lossy();
-            return Ok(Php::lint(path.as_ref())?);
+            return Ok(php.lint(path.as_ref(), &script_args)?);
         } else {
             eprintln!("No input file specified for syntax check");
             return Ok(1);
@@ -673,18 +826,22 @@ fn run() -> Result<i32> {
 
     // Handle -r (run code)
     if let Some(code) = &args.run {
-        return Ok(Php::execute_code(code, &script_args)?);
+        return Ok(php.execute_code(code, &script_args)?);
     }
 
     // Handle script execution
     if let Some(ref s) = script {
         let script_path = s.to_string_lossy();
-        return Ok(Php::execute_script(script_path.as_ref(), &script_args)?);
+        return Ok(php.execute_script(script_path.as_ref(), &script_args)?);
     }
 
     // No action specified - show usage
-    let v = Php::version();
-    eprintln!("pox {} - PHP {} embedded in Rust", env!("CARGO_PKG_VERSION"), v.version);
+    let v = php.version();
+    eprintln!(
+        "pox {} - PHP {} runtime",
+        env!("CARGO_PKG_VERSION"),
+        v.version
+    );
     eprintln!();
     eprintln!("Usage: pox [options] [-f] <file> [--] [args...]");
     eprintln!("       pox [options] -r <code> [--] [args...]");
@@ -700,6 +857,7 @@ fn run() -> Result<i32> {
     eprintln!("  -h, --help      Show this help message");
     eprintln!();
     eprintln!("Subcommands:");
+    eprintln!("  php             Install and select PHP runtimes");
     eprintln!("  server          Start a PHP development server");
     eprintln!("  init            Create a new composer.json in current directory (Riff)");
     eprintln!("  create-project  Create a project from a package (Riff)");
