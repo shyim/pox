@@ -20,7 +20,7 @@ Pox.
 - **PHP version management** — Install, pin, inspect, and remove PHP 8.4/8.5
   runtimes per project or globally.
 - **Stable runtime boundary** — PHP and Zend internals stay inside a
-  self-contained `libpox_php.so`; Rust uses opaque handles and owned values.
+  self-contained platform library; Rust uses opaque handles and owned values.
 - **Verified downloads** — Release metadata is signed with Ed25519 and every
   runtime archive and library is checked with SHA-256.
 - **Development server** — Standard request mode, long-running worker mode,
@@ -79,9 +79,9 @@ Pox follows XDG paths. Runtimes live below
 global selection in `$XDG_CONFIG_HOME/pox/config.toml`.
 
 Runtime artifacts are published by
-[`shyim/pox-runtime`](https://github.com/shyim/pox-runtime) for Linux glibc and
-musl on x86_64 and aarch64. A Pox binary and runtime must use the same libc and
-architecture.
+[`shyim/pox-runtime`](https://github.com/shyim/pox-runtime) for macOS and Linux
+glibc/musl on x86_64 and aarch64. A Pox binary and runtime must use the same OS
+and architecture; Linux builds must also use the same libc.
 
 ## PHP CLI
 
@@ -170,7 +170,7 @@ plugins inside its Rust process; see its
 | --- | --- |
 | `pox-cli` | Runtime manager, PHP-compatible CLI, server, and Riff routing |
 | `pox-embed` | Safe dynamic loader and owned CLI/web/worker Rust APIs |
-| `libpox_php.so` | Versioned ABI adapter, PHP/Zend internals, and native libraries |
+| `libpox_php.so` / `libpox_php.dylib` | Versioned ABI adapter, PHP/Zend internals, and native libraries |
 | `pox-runtime` | PHP 8.4/8.5 builds, signed release index, and target artifacts |
 
 The shared library exports only `pox_php_get_api`. ABI major versions are

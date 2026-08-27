@@ -15,27 +15,53 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
+            platform: linux
             dockerfile: Dockerfile.release-glibc
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
+            platform: linux
             dockerfile: Dockerfile.release-glibc
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-24.04
+            platform: linux
             dockerfile: Dockerfile.release-musl
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
+            platform: linux
             dockerfile: Dockerfile.release-musl
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            platform: macos
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            platform: macos
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - if: matrix.platform == 'linux'
+        uses: docker/setup-buildx-action@v3
+      - if: matrix.platform == 'linux'
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           push: false
           outputs: type=local,dest=dist
           build-args: TARGET=${{ matrix.target }}
+      - if: matrix.platform == 'macos'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          targets: ${{ matrix.target }}
+      - name: Build macOS binary
+        if: matrix.platform == 'macos'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '13.0'
+          TARGET: ${{ matrix.target }}
+        run: |
+          cargo build --release --locked --target "${TARGET}"
+          mkdir -p dist
+          cp "target/${TARGET}/release/pox" dist/pox
       - name: Package binary
         env:
           TARGET: ${{ matrix.target }}
@@ -43,7 +69,11 @@ jobs:
         run: |
           chmod 0755 dist/pox
           tar -C dist -czf "pox-${VERSION}-${TARGET}.tar.gz" pox
-          sha256sum "pox-${VERSION}-${TARGET}.tar.gz" > "pox-${VERSION}-${TARGET}.tar.gz.sha256"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "pox-${VERSION}-${TARGET}.tar.gz" > "pox-${VERSION}-${TARGET}.tar.gz.sha256"
+          else
+            shasum -a 256 "pox-${VERSION}-${TARGET}.tar.gz" > "pox-${VERSION}-${TARGET}.tar.gz.sha256"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: pox-${{ matrix.target }}

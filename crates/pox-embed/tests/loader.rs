@@ -6,12 +6,17 @@ static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn fake_runtime(target: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     let directory = tempfile::tempdir().unwrap();
-    let output = directory.path().join("libpox_php.so");
+    let (library_name, library_flag) = if cfg!(target_os = "macos") {
+        ("libpox_php.dylib", "-dynamiclib")
+    } else {
+        ("libpox_php.so", "-shared")
+    };
+    let output = directory.path().join(library_name);
     let source =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_runtime.c");
     let target_define = format!("-DPOX_TEST_TARGET=\"{target}\"");
     let status = Command::new("cc")
-        .args(["-shared", "-fPIC", "-fvisibility=hidden"])
+        .args([library_flag, "-fPIC", "-fvisibility=hidden"])
         .arg(target_define)
         .arg(source)
         .arg("-o")

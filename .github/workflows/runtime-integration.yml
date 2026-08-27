@@ -12,14 +12,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.4', '8.5']
-    runs-on: ubuntu-24.04
+        include:
+          - php: '8.4'
+            runner: ubuntu-24.04
+          - php: '8.5'
+            runner: ubuntu-24.04
+          - php: '8.4'
+            runner: macos-15-intel
+          - php: '8.5'
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
     env:
       XDG_DATA_HOME: /tmp/pox-data
       XDG_CACHE_HOME: /tmp/pox-cache
       XDG_CONFIG_HOME: /tmp/pox-config
     steps:
       - uses: actions/checkout@v6
+      - if: runner.os == 'macOS'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
       - name: Build Pox without PHP development files
         run: cargo build --workspace --locked
       - name: Install and select released runtime

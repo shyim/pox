@@ -4,14 +4,15 @@
 runtimes. It does not compile against PHP, invoke `php-config`, or expose PHP or
 Zend structures.
 
-The loaded `libpox_php.so` exports one versioned function table. This crate
-validates its ABI, target, and ZTS metadata, then wraps it in owned Rust APIs for
-CLI execution, HTTP requests, and long-running workers.
+The loaded runtime library (`libpox_php.so` on Linux or `libpox_php.dylib` on
+macOS) exports one versioned function table. This crate validates its ABI,
+target, and ZTS metadata, then wraps it in owned Rust APIs for CLI execution,
+HTTP requests, and long-running workers.
 
 ```rust,no_run
 use pox_embed::PhpRuntime;
 
-let php = PhpRuntime::load("/path/to/libpox_php.so")?;
+let php = PhpRuntime::load("/path/to/platform/runtime/library")?;
 println!("PHP {}", php.version());
 php.execute_code(r#"echo "Hello from PHP\n";"#, &[] as &[&str])?;
 # Ok::<(), pox_embed::PhpError>(())
@@ -26,7 +27,7 @@ Set `POX_PHP_RUNTIME` and enable `runtime-integration` to run the real runtime
 suite:
 
 ```bash
-POX_PHP_RUNTIME=/path/to/libpox_php.so \
+POX_PHP_RUNTIME=/path/to/platform/runtime/library \
   cargo test -p pox-embed --features runtime-integration -- --test-threads=1
 ```
 

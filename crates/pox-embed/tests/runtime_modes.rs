@@ -5,7 +5,7 @@ use std::fs;
 
 fn runtime() -> PhpRuntime {
     let path = std::env::var_os("POX_PHP_RUNTIME")
-        .expect("POX_PHP_RUNTIME must point to a test libpox_php.so");
+        .expect("POX_PHP_RUNTIME must point to a test Pox PHP runtime library");
     PhpRuntime::load(path).expect("load test PHP runtime")
 }
 

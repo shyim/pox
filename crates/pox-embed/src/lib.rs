@@ -1,7 +1,8 @@
 //! Safe loader for independently distributed Pox PHP runtimes.
 //!
-//! PHP and Zend internals live entirely inside `libpox_php.so`. This crate only
-//! speaks the versioned, Pox-owned C ABI and exposes owned Rust values.
+//! PHP and Zend internals live entirely inside the platform runtime library.
+//! This crate only speaks the versioned, Pox-owned C ABI and exposes owned Rust
+//! values.
 
 use libloading::{Library, Symbol};
 use serde::Deserialize;
@@ -924,13 +925,25 @@ impl Drop for WorkerPool {
 }
 
 pub const fn runtime_target() -> &'static str {
-    if cfg!(all(target_arch = "x86_64", target_env = "musl")) {
+    if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "x86_64-apple-darwin"
+    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "aarch64-apple-darwin"
+    } else if cfg!(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_env = "musl"
+    )) {
         "x86_64-unknown-linux-musl"
-    } else if cfg!(all(target_arch = "aarch64", target_env = "musl")) {
+    } else if cfg!(all(
+        target_os = "linux",
+        target_arch = "aarch64",
+        target_env = "musl"
+    )) {
         "aarch64-unknown-linux-musl"
-    } else if cfg!(target_arch = "x86_64") {
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         "x86_64-unknown-linux-gnu"
-    } else if cfg!(target_arch = "aarch64") {
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
         "aarch64-unknown-linux-gnu"
     } else {
         "unsupported"
