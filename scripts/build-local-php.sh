@@ -44,10 +44,15 @@ if [[ -x "${PHP_CONFIG}" ]]; then
 else
     (
         cd "${POX_RUNTIME_SOURCE}"
-        PHP_VERSION="${PHP_VERSION}" \
-        TARGET="${TARGET}" \
-        RUNTIME_REVISION=dev \
-            ./scripts/build-php-runtime.sh
+        runtime_environment=(
+            "PHP_VERSION=${PHP_VERSION}"
+            "TARGET=${TARGET}"
+            "RUNTIME_REVISION=dev"
+        )
+        if [[ -n "${runtime_libc}" ]]; then
+            runtime_environment+=("SPC_LIBC=${runtime_libc/gnu/glibc}")
+        fi
+        env "${runtime_environment[@]}" ./scripts/build-php-runtime.sh
     )
 fi
 
