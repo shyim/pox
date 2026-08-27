@@ -20,10 +20,6 @@ jobs:
       XDG_CONFIG_HOME: /tmp/pox-config
     steps:
       - uses: actions/checkout@v6
-      - name: Configure Rust cache
-        uses: namespacelabs/nscloud-cache-action@v1
-        with:
-          cache: rust
       - name: Build Pox without PHP development files
         run: cargo build --workspace --locked
       - name: Install and select released runtime
