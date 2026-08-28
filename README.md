@@ -28,7 +28,23 @@ Pox.
 - **Riff package manager** — Read and write Composer projects without invoking
   PHP or Composer as subprocesses.
 
-## Getting started
+## Installation
+
+Version tags publish Pox archives for Linux glibc, Linux musl, and macOS on
+x86_64 and aarch64 to [GitHub Releases](https://github.com/shyim/pox/releases).
+Each archive contains the `pox` executable, this README, and the license. Verify
+the archive against `SHA256SUMS`, extract it, and place `pox` on your `PATH`.
+
+Pox does not bundle a particular PHP version. After installing the executable,
+install and select a signed PHP runtime independently:
+
+```bash
+pox php install 8.5
+pox php use 8.5 --global
+pox -v
+```
+
+## Building from source
 
 Build Pox, install a runtime, and select it globally:
 
@@ -198,6 +214,22 @@ mise run test:runtime
 The runtime helper reuses `pox-php-config` when available; otherwise the runtime
 repository builds ZTS/embed PHP through static-php-cli. The Riff dependency is
 pinned to an exact Git revision in `Cargo.toml` and `Cargo.lock`.
+
+### Cutting a Pox release
+
+Update `[workspace.package].version` in `Cargo.toml`, validate the workspace,
+and push that commit. Before tagging, the release workflow can be dispatched
+manually to build all six archives as temporary workflow artifacts without
+creating a GitHub release:
+
+```bash
+gh workflow run release.yml --ref main
+```
+
+Create and push an annotated `v<version>` tag when those artifacts are ready.
+The pipeline requires the tag to exactly match the Cargo workspace version,
+rebuilds all targets, verifies every checksum, and publishes the archives plus
+one `SHA256SUMS` file as a GitHub release.
 
 ## License
 

@@ -2,13 +2,63 @@ name: Release Pox
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: pox-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  metadata:
+    name: Validate release metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read and validate the release version
+        id: release
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version="$({
+            awk '
+              /^\[workspace\.package\]$/ { in_workspace_package = 1; next }
+              /^\[/ { in_workspace_package = 0 }
+              in_workspace_package && $1 == "version" {
+                gsub(/"/, "", $3)
+                print $3
+                exit
+              }
+            ' Cargo.toml
+          })"
+
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Cargo.toml contains an invalid release version: ${version:-<missing>}" >&2
+            exit 1
+          fi
+
+          tag="v${version}"
+          if [[ "${EVENT_NAME}" == "push" && "${REF_NAME}" != "${tag}" ]]; then
+            echo "Tag ${REF_NAME} does not match workspace version ${version}; expected ${tag}" >&2
+            exit 1
+          fi
+
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
   build:
+    name: Build ${{ matrix.target }}
+    needs: metadata
     strategy:
       fail-fast: false
       matrix:
@@ -37,22 +87,31 @@ jobs:
             platform: macos
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v6
-      - if: matrix.platform == 'linux'
-        uses: docker/setup-buildx-action@v3
-      - if: matrix.platform == 'linux'
-        uses: docker/build-push-action@v6
+      - uses: actions/checkout@v7
+
+      - name: Configure Docker Buildx
+        if: matrix.platform == 'linux'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build Linux binary
+        if: matrix.platform == 'linux'
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           push: false
           outputs: type=local,dest=dist
           build-args: TARGET=${{ matrix.target }}
-      - if: matrix.platform == 'macos'
+          cache-from: type=gha,scope=pox-release-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=pox-release-${{ matrix.target }}
+
+      - name: Install Rust for macOS
+        if: matrix.platform == 'macos'
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.0
           targets: ${{ matrix.target }}
+
       - name: Build macOS binary
         if: matrix.platform == 'macos'
         env:
@@ -60,37 +119,92 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           cargo build --release --locked --target "${TARGET}"
+          strip "target/${TARGET}/release/pox"
           mkdir -p dist
           cp "target/${TARGET}/release/pox" dist/pox
-      - name: Package binary
+
+      - name: Verify binary
+        shell: bash
         env:
           TARGET: ${{ matrix.target }}
-          VERSION: ${{ github.ref_name }}
         run: |
-          chmod 0755 dist/pox
-          tar -C dist -czf "pox-${VERSION}-${TARGET}.tar.gz" pox
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "pox-${VERSION}-${TARGET}.tar.gz" > "pox-${VERSION}-${TARGET}.tar.gz.sha256"
-          else
-            shasum -a 256 "pox-${VERSION}-${TARGET}.tar.gz" > "pox-${VERSION}-${TARGET}.tar.gz.sha256"
+          dist/pox --help >/dev/null
+          file dist/pox
+
+          if [[ "${TARGET}" == *-linux-musl ]] && ! file dist/pox | grep -q 'statically linked'; then
+            echo "${TARGET} must produce a statically linked portable binary" >&2
+            exit 1
           fi
-      - uses: actions/upload-artifact@v4
+
+      - name: Package binary
+        shell: bash
+        env:
+          POX_BINARY: dist/pox
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: ./scripts/package-release.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
         with:
-          name: pox-${{ matrix.target }}
+          name: pox-${{ needs.metadata.outputs.version }}-${{ matrix.target }}
           path: |
-            pox-*.tar.gz
-            pox-*.tar.gz.sha256
+            dist/pox-*.tar.gz
+            dist/pox-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
 
   publish:
-    needs: build
-    runs-on: ubuntu-latest
+    name: Publish GitHub release
+    if: github.event_name == 'push'
+    needs:
+      - metadata
+      - build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
         with:
-          pattern: pox-*
+          pattern: pox-${{ needs.metadata.outputs.version }}-*
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+
+      - name: Verify and consolidate checksums
+        shell: bash
+        run: |
+          archive_count="$(find dist -maxdepth 1 -type f -name 'pox-*.tar.gz' | wc -l | tr -d ' ')"
+          if [[ "${archive_count}" != 6 ]]; then
+            echo "Expected six release archives, found ${archive_count}" >&2
+            exit 1
+          fi
+
+          (
+            cd dist
+            sha256sum --check ./*.sha256
+            sha256sum ./*.tar.gz > SHA256SUMS
+          )
+
+      - name: Publish release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          release_flags=(
+            --verify-tag
+            --generate-notes
+            --title "Pox ${VERSION}"
+          )
+          if [[ "${VERSION}" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+
+          gh release create "${TAG}" \
+            dist/pox-*.tar.gz \
+            dist/SHA256SUMS \
+            "${release_flags[@]}"
