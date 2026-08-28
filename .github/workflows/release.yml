@@ -131,7 +131,7 @@ jobs:
           dist/pox --help >/dev/null
           file dist/pox
 
-          if [[ "${TARGET}" == *-linux-musl ]] && ! file dist/pox | grep -q 'statically linked'; then
+          if [[ "${TARGET}" == *-linux-musl ]] && ! file dist/pox | grep -Eq 'static-pie linked|statically linked'; then
             echo "${TARGET} must produce a statically linked portable binary" >&2
             exit 1
           fi
