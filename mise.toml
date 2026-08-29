@@ -20,9 +20,9 @@ run = "./scripts/build-local-php.sh"
 [tasks."test:runtime"]
 description = "Run the complete suite against the locally built PHP runtime"
 run = '''
-runtime_library=../pox-runtime/build/libpox_php.so
+runtime_library="$PWD/../pox-runtime/build/libpox_php.so"
 if [ "$(uname -s)" = Darwin ]; then
-  runtime_library=../pox-runtime/build/libpox_php.dylib
+  runtime_library="$PWD/../pox-runtime/build/libpox_php.dylib"
 fi
 POX_PHP_RUNTIME="${runtime_library}" cargo test --workspace --all-targets --features pox-embed/runtime-integration --locked -- --test-threads=1
 '''

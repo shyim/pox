@@ -11,8 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 pox-embed = { path = "../pox-embed" }
-riff = { git = "https://github.com/shyim/riff.git", rev = "96879c9cb48f6ed9620d6ab634fdf79b6f3e8e6b", default-features = false }
-riff-core = { git = "https://github.com/shyim/riff.git", rev = "96879c9cb48f6ed9620d6ab634fdf79b6f3e8e6b" }
+riff = { git = "https://github.com/shyim/riff.git", rev = "58987fe74c926f3c63f46970cf3c2d2d64e1854c", default-features = false }
+riff-core = { git = "https://github.com/shyim/riff.git", rev = "58987fe74c926f3c63f46970cf3c2d2d64e1854c" }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 tiny_http = "0.12"
