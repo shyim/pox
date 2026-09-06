@@ -9,6 +9,10 @@ on:
         description: 'Optional full pox-runtime commit SHA to build instead of installing a release'
         type: string
         default: ''
+      musl_only:
+        description: 'Run only musl candidate checks (requires runtime_source_ref)'
+        type: boolean
+        default: false
   repository_dispatch:
     types: [pox-runtime-released]
 
@@ -17,6 +21,7 @@ permissions:
 
 jobs:
   integration:
+    if: inputs.musl_only != true
     strategy:
       fail-fast: false
       matrix:
@@ -139,5 +144,80 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: runtime-provenance-${{ matrix.php }}-${{ matrix.target }}
+          path: validation/
+          if-no-files-found: warn
+
+  musl_candidate:
+    if: github.event_name == 'workflow_dispatch' && (inputs.runtime_source_ref != '' || inputs.musl_only)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      RUNTIME_SOURCE_REF: ${{ inputs.runtime_source_ref }}
+      TARGET: ${{ matrix.target }}
+      PHP_VERSION: '8.5.9'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate native source revision
+        shell: bash
+        run: |
+          if [[ ! "$RUNTIME_SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'runtime_source_ref must be a full lowercase commit SHA' >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v6
+        with:
+          repository: shyim/pox-runtime
+          ref: ${{ inputs.runtime_source_ref }}
+          path: native-source
+          persist-credentials: false
+      - name: Build musl native candidate
+        shell: bash
+        run: |
+          test "$(git -C native-source rev-parse HEAD)" = "$RUNTIME_SOURCE_REF"
+          docker build --target builder --file native-source/Dockerfile.musl \
+            --build-arg PHP_VERSION --build-arg TARGET \
+            --build-arg "RUNTIME_REVISION=ci-$RUNTIME_SOURCE_REF" \
+            --tag pox-native-candidate native-source
+          mkdir -p native-artifacts validation
+          docker run --rm --volume "$PWD/native-artifacts:/out" pox-native-candidate \
+            sh -ec 'cd /work; bash tests/smoke.sh; cp build/libpox_php.so /out/'
+      - name: Run musl HTTP integration and load tests
+        shell: bash
+        run: |
+          docker run --rm --volume "$PWD:/work" --workdir /work \
+            --env POX_PHP_RUNTIME=/work/native-artifacts/libpox_php.so \
+            --env 'RUSTFLAGS=-C target-feature=-crt-static' --env TARGET \
+            rust:1.98-alpine3.22 sh -ec '
+              set -o pipefail
+              apk add --no-cache build-base ca-certificates cmake git perl pkgconf python3 >/dev/null
+              cargo test --workspace --all-targets --features pox-cli/runtime-integration --locked --target "$TARGET" -- --test-threads=1 2>&1 | tee validation/tests.log
+              "target/$TARGET/debug/pox" -r "exit(PHP_ZTS ? 0 : 1);"
+              python3 scripts/stress-http-server.py --binary "target/$TARGET/debug/pox" --runtime "$POX_PHP_RUNTIME" --requests 5000 --clients 16 --workers 4 --recycle 200 | tee validation/load.jsonl
+              python3 scripts/stress-http-server.py --binary "target/$TARGET/debug/pox" --runtime "$POX_PHP_RUNTIME" --requests 5000 --clients 16 --workers 4 --recycle 200 --flush | tee validation/load-flush.jsonl
+            '
+      - name: Record musl candidate provenance
+        if: always()
+        run: |
+          mkdir -p validation
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          runtime = pathlib.Path('native-artifacts/libpox_php.so')
+          record = dict(pox_commit=os.environ['GITHUB_SHA'], target=os.environ['TARGET'],
+                        runtime_source_commit=os.environ['RUNTIME_SOURCE_REF'],
+                        runtime_sha256=hashlib.sha256(runtime.read_bytes()).hexdigest() if runtime.exists() else None)
+          pathlib.Path('validation/runtime.json').write_text(json.dumps(record, indent=2) + '\n')
+          PY
+      - name: Upload musl validation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-provenance-8.5-${{ matrix.target }}
           path: validation/
           if-no-files-found: warn
