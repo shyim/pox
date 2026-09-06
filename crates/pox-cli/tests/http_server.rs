@@ -953,9 +953,12 @@ fn shutdown_callback_failure_does_not_complete_a_streamed_response() {
 #[test]
 fn http_deadlines_cancel_busy_php_and_shutdown_callbacks() {
     for worker in [false, true] {
+        // Enter the shutdown callback before the deadline. A callback reached
+        // after timing out main execution can itself be interrupted before its
+        // first statement by repeated cancellation, so it cannot prove coverage.
         let server = TestServer::start_with_concurrency(worker,
             "request_timeout_ms = 200\nqueue_timeout_ms = 100\nmax_inflight_requests = 2",
-            "if ($_SERVER['REQUEST_URI'] === '/shutdown') { register_shutdown_function(function () { file_put_contents(__DIR__.'/cleanup', 'yes'); while (true) {} }); while (true) {} } if ($_SERVER['REQUEST_URI'] === '/loop') { while (true) {} } echo 'healthy';",
+            "if ($_SERVER['REQUEST_URI'] === '/shutdown') { register_shutdown_function(function () { file_put_contents(__DIR__.'/cleanup', 'yes'); while (true) {} }); exit; } if ($_SERVER['REQUEST_URI'] === '/loop') { while (true) {} } echo 'healthy';",
             false, "", 1);
         for route in ["/loop", "/shutdown", "/loop"] {
             let started = Instant::now();

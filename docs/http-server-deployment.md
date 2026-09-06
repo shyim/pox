@@ -208,3 +208,15 @@ python3 scripts/test-http-startup-failure.py \
 The probe requires failure before an HTTP listener is observed, then removes the
 bad configuration and verifies a fresh process can serve and shut down cleanly.
 It does not attempt to retry PHP initialization within the failed process.
+
+### PHP timers on macOS
+
+On ZTS runtimes built without Zend per-thread execution timers (including the
+macOS candidates), HTTP startup forces `max_execution_time=0` and
+`max_input_time=-1`, following FrankenPHP's policy. PHP's fallback timer is
+process-wide and cannot isolate concurrent requests. Pox's `request_timeout_ms`
+and request-scoped cancellation continue to apply. CLI execution keeps its
+configured PHP timer behavior. Applications must not re-enable PHP's process-wide
+timer with `set_time_limit()` or `ini_set('max_execution_time', ...)` in these HTTP
+runtimes; use the Pox request deadline. Native extension calls can still require
+external process termination when they do not return to the PHP VM.

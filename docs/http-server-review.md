@@ -1368,3 +1368,50 @@ the Bookworm PHP 8.5.9 library. See [validation record](validation/http-ci-recov
 Both authenticated musl-only jobs progressed beyond native compilation into the
 Rust integration stage, establishing that the earlier dependency-download failure
 was cleared in those jobs. Remote test outcomes remain pending.
+
+The initial ARM musl job completed successfully: 120 tests and four 5,000-request
+load checks (buffered/flushed, standard/worker), with no errors and clean shutdowns.
+The overall run failed on the separate x86_64 download job. See [ARM musl evidence](validation/http-ci-musl-arm-linux-2026-09-06.json).
+The latest Pox commit 3cfef6d95bd1af1009879872064e087d765bb73d is dispatched in
+[run 34063032366](https://github.com/shyim/pox/actions/runs/34063032366), using the
+same native commit, to validate the optional-version fix and readiness-synchronized
+recycling test across the full matrix. Its results remain pending.
+
+## Fifty-fifth hardening pass: authenticated musl and Darwin ARM results
+
+Both jobs in authenticated musl run 34062409646 completed successfully. Each ran
+120 tests and four 5,000-request load checks (standard/worker, buffered/flushed)
+with no errors and clean exits. Darwin ARM in run 34062511910 also completed
+successfully with all 117 applicable tests; the earlier recycling failure did
+not recur on that unchanged test. Three Linux-specific HTTP tests and the Linux
+resource-load harness do not run on Darwin.
+
+These results validate Pox 49a66ca and native 10c8b5d, preceding the optional
+version fix and readiness synchronization. The latest run 34063032366 is live
+on all seven jobs. See [platform evidence](validation/http-ci-authenticated-platforms-2026-09-06.json).
+
+## Fifty-sixth hardening pass: shutdown coverage and platform timer policy
+
+A second ARM musl job in run 34062511910 passed 61 HTTP tests but failed the
+shutdown-cancellation fixture because its cleanup marker was absent. The fixture
+previously entered shutdown only after cancelling an infinite main loop; repeated
+cancellation can interrupt the shutdown callback before its first statement.
+It now uses `exit` to enter an infinite shutdown callback before the deadline.
+Separate `/loop` requests retain main-execution cancellation coverage. Both modes
+passed ten local repetitions against the Bookworm runtime.
+
+The original Darwin Intel PHP 8.4 job passed its HTTP tests but failed reusable
+web-thread isolation: a trivial request returned empty output with a reported
+30-second PHP timeout within milliseconds. PHP's fallback `setitimer` is
+process-wide; FrankenPHP disables its INI timeouts on builds without
+ZEND_MAX_EXECUTION_TIMERS. Pox now follows that startup policy in HTTP modes and
+prevents its own runtime INI reapplication from restoring those timer settings.
+CLI settings are preserved. This is a likely explanation for the Darwin failure,
+not yet a remotely proven resolution. See PHP [bug 79464](https://bugs.php.net/bug.php?id=79464)
+and the cloned FrankenPHP `go_get_custom_php_ini` implementation. A regression
+checks both HTTP modes' platform-specific configured values.
+
+The rebuilt local native library passed its smoke test and all 122 Rust/runtime
+tests. The no-per-thread-timer branch passed strict C syntax validation using a
+forced include that undefines the feature macro. This does not substitute for
+Darwin execution. See [timer validation](validation/http-platform-timer-fix-2026-09-06.json).

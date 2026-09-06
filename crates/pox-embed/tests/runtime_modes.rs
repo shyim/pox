@@ -728,3 +728,46 @@ fn reusable_web_threads_keep_request_state_isolated_and_can_reattach() {
         b"1:/owner"
     );
 }
+
+#[test]
+fn http_modes_use_platform_appropriate_php_timers() {
+    let php = runtime();
+    php.set_ini_entries(Some("max_execution_time=7\nmax_input_time=9\n"))
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let script = directory.path().join("index.php");
+    let expected: &[u8] = if cfg!(target_os = "macos") {
+        b"0:-1"
+    } else {
+        b"7:9"
+    };
+    let callback = "echo ini_get('max_execution_time').':'.ini_get('max_input_time');";
+    fs::write(&script, format!("<?php {callback}")).unwrap();
+    let web = php.web().unwrap();
+    assert_eq!(
+        web.execute(request(directory.path(), &script, "/"))
+            .unwrap()
+            .body,
+        expected
+    );
+    drop(web);
+    fs::write(
+        &script,
+        format!("<?php while (pox_handle_request(function () {{ {callback} }})) {{}}"),
+    )
+    .unwrap();
+    let workers = php
+        .workers(
+            script.to_str().unwrap(),
+            directory.path().to_str().unwrap(),
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        workers
+            .handle_request(request(directory.path(), &script, "/"))
+            .unwrap()
+            .body,
+        expected
+    );
+}

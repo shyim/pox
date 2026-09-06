@@ -1,0 +1,24 @@
+{
+  "native_commit": "28da99e2b32667845ea9aafdfa631fa0f65d3829",
+  "native_local_sha256": "081e2af7e284ce4ed06565174533a60d8fb5bcbea0a1a0c083ac3272e209d6cb",
+  "local_full_tests_passed": 122,
+  "shutdown_test_repetitions": 10,
+  "native_smoke": "passed",
+  "no_zend_timers_branch": "strict C syntax validation passed using header that undefines ZEND_MAX_EXECUTION_TIMERS; no Darwin runtime claim",
+  "failures_addressed": [
+    {
+      "job": 101565426188,
+      "test": "http_deadlines_cancel_busy_php_and_shutdown_callbacks",
+      "observed": "shutdown callback marker absent"
+    },
+    {
+      "job": 101564350095,
+      "test": "reusable_web_threads_keep_request_state_isolated_and_can_reattach",
+      "observed": "empty response accompanied by premature 30-second execution-time fatal"
+    }
+  ],
+  "limitations": [
+    "Darwin root cause is inferred from PHP timer implementation and FrankenPHP policy; corrected Darwin execution remains pending.",
+    "Local native test library uses development-host SDK and is not a portable release artifact."
+  ]
+}

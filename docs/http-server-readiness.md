@@ -72,3 +72,23 @@ after releasing replacement bootstrap. A separately reproduced panic when readin
 a server-only configuration is also fixed. The updated local suite passed 121
 tests against the Bookworm runtime; updated remote validation remains pending.
 See [recovery fixes](validation/http-ci-recovery-fixes-2026-09-06.json).
+
+The initial ARM musl job completed successfully: 120 tests and four 5,000-request
+load checks (buffered/flushed, standard/worker), with no errors and clean shutdowns.
+The overall run failed on the separate x86_64 download job. See [ARM musl evidence](validation/http-ci-musl-arm-linux-2026-09-06.json).
+The latest Pox commit 3cfef6d95bd1af1009879872064e087d765bb73d is dispatched in
+[run 34063032366](https://github.com/shyim/pox/actions/runs/34063032366), using the
+same native commit, to validate the optional-version fix and readiness-synchronized
+recycling test across the full matrix. Its results remain pending.
+
+Authenticated musl CI passed on both architectures: 120 tests and 20,000 load
+requests per job, without errors and with clean shutdowns. Darwin ARM passed
+117 applicable tests on Pox 49a66ca; its prior recycling failure did not recur.
+These are preceding-commit results, with the latest full matrix still running.
+See [platform evidence](validation/http-ci-authenticated-platforms-2026-09-06.json).
+
+A separate Darwin Intel run exposed a premature PHP execution timeout during
+thread reuse. Native HTTP startup now disables process-wide PHP timers where
+Zend per-thread timers are unavailable, following FrankenPHP. The rebuilt local
+library passed 122 tests; corrected remote platform results remain pending.
+See [timer validation](validation/http-platform-timer-fix-2026-09-06.json).
