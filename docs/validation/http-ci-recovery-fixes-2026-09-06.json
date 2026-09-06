@@ -1,0 +1,25 @@
+{
+  "native_sha256": "fa2863114a5065755bf401ce1122d935a83b26684ee77174d10ded8b37cbfc89",
+  "local_validation": {
+    "command": "POX_PHP_RUNTIME=/tmp/pox-glibc-release-artifacts/libpox_php.so mise x rust -- cargo test --workspace --all-targets --features pox-cli/runtime-integration --locked -- --test-threads=1",
+    "tests_passed": 121,
+    "log_sha256": "1b3fc3b9739fb28ea59cc8dfee4f17c26f49e17124484ebc8b492229caafba3c"
+  },
+  "remote_failure": {
+    "run": 34062110978,
+    "job": 101564350092,
+    "platform": "aarch64-apple-darwin",
+    "http_tests_passed": 58,
+    "http_tests_failed": 1,
+    "test": "recycling_queue_deadline_and_disconnect_do_not_execute_abandoned_requests",
+    "observed": "Expected HTTP 200, received 503; assertion helper did not identify request phase."
+  },
+  "changes": [
+    "Wait for admin readiness after releasing replacement bootstrap before checking recovery; retain strict abandonment queue deadline and exact PHP side-effect assertion.",
+    "Use optional lookup for PHP version in server-only configuration instead of panicking on missing TOML keys."
+  ],
+  "limitations": [
+    "Readiness timing explanation for Darwin failure is an inference; updated Darwin test remains pending.",
+    "Local full suite uses Linux development host with Bookworm native library."
+  ]
+}

@@ -2220,7 +2220,7 @@ fn recycling_queue_deadline_and_disconnect_do_not_execute_abandoned_requests() {
         } else {
             "worker_max_requests = 1\nqueue_timeout_ms = 100"
         };
-        let server = TestServer::start_with_concurrency(true, limits, "file_put_contents(__DIR__.'/calls', $_SERVER['REQUEST_URI'].\"\\n\", FILE_APPEND); echo 'done';", false, "if (file_exists(__DIR__.'/hold-bootstrap')) { file_put_contents(__DIR__.'/booting', 'x'); while (!file_exists(__DIR__.'/release')) { usleep(1000); } }", 1);
+        let (server, admin) = admin_server(true, limits, "file_put_contents(__DIR__.'/calls', $_SERVER['REQUEST_URI'].\"\\n\", FILE_APPEND); echo 'done';", "if (file_exists(__DIR__.'/hold-bootstrap')) { file_put_contents(__DIR__.'/booting', 'x'); while (!file_exists(__DIR__.'/release')) { usleep(1000); } }");
         let root = server.directory.path().join("public");
         std::fs::write(root.join("hold-bootstrap"), "x").unwrap();
         assert_status(&server.get("/first"), 200);
@@ -2242,6 +2242,17 @@ fn recycling_queue_deadline_and_disconnect_do_not_execute_abandoned_requests() {
         }
         std::fs::remove_file(root.join("hold-bootstrap")).unwrap();
         std::fs::write(root.join("release"), "go").unwrap();
+        // Releasing bootstrap does not synchronously make the replacement ready.
+        // Keep its startup time separate from the short queue deadline under test.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !exchange(admin, "GET", "/ready").starts_with("HTTP/1.1 200 ") {
+            assert!(
+                Instant::now() < deadline,
+                "replacement did not become ready: {}",
+                server.logs()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert_status(&server.get("/after"), 200);
         assert_eq!(
             std::fs::read_to_string(root.join("calls")).unwrap(),

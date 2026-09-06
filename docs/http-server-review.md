@@ -1280,3 +1280,91 @@ buffered/flushed load reports and source/artifact provenance are retained. All
 workflows pass actionlint; the embedded Python parses, and full-SHA acceptance/
 rejection checks pass. No remote run is claimed, and musl remote execution remains
 outside this matrix. The source changes are still local and unpublished.
+
+## Fiftieth hardening pass: review branches and live candidate CI
+
+The prepared patches were committed in isolated checkouts and pushed to
+codex/http-server-hardening in both repositories. Native commit is
+10c8b5d21b620c0e2e5868da28f526d0e1efd246; Pox commit is
+785e7bd3df5fc0a8ad77cc0b5080e011a712ded2. Original worktrees and indexes were
+preserved. No tag, release, merge or pull-request message was created.
+
+The actual staged check found end-of-line whitespace in two generated Callgrind
+annotation reports that earlier unstaged checks did not inspect. Exact-file Git
+attributes preserve those reports verbatim while keeping other whitespace checks.
+The complete staged patch then passed.
+
+[Candidate run 34062110978](https://github.com/shyim/pox/actions/runs/34062110978)
+is verified in progress at the recorded Pox commit. Its five jobs cover Linux
+x86_64 PHP 8.4/8.5, Linux aarch64 PHP 8.5, Darwin x86_64 PHP 8.4 and Darwin
+aarch64 PHP 8.5, each building the pinned native source. See
+[start record](validation/http-candidate-ci-start-2026-09-06.json). Execution has
+started, but no job result or platform success is claimed yet.
+
+## Fifty-first hardening pass: live musl candidate CI
+
+The source-candidate workflow now covers x86_64 and aarch64 musl in separate
+Alpine jobs. Native candidates use their musl Dockerfile; Rust tests retain
+-crt-static so they can load the shared PHP library. Both jobs run the full
+HTTP-enabled suite, ZTS execution, and buffered/flushed load checks and retain
+provenance/test artifacts. A musl_only dispatch option avoids repeating the
+already-running glibc/Darwin jobs.
+
+The workflow passes actionlint, embedded Python parsing and local Alpine shell
+capability checks. Pox review commit 367965a adds this path.
+[Run 34062300114](https://github.com/shyim/pox/actions/runs/34062300114) is verified
+active at the matching commit and pinned native SHA. The original five-job run
+continues independently. See [start record](validation/http-musl-candidate-ci-start-2026-09-06.json).
+No completed remote test result is claimed yet.
+
+## Fifty-second hardening pass: candidate dependency download authentication
+
+The first musl x86_64 candidate job failed before PHP compilation when SPC's
+GitHub release API downloads returned HTTP 403. Candidate builds omitted the
+read-only GITHUB_TOKEN used by the existing native release workflow. Linux
+candidates now pass it through the native Dockerfile's BuildKit secret mount;
+macOS candidates receive it in the build process environment. No token is placed
+in a build argument or artifact.
+
+Pox review commit 49a66ca contains the correction and passes actionlint/staged
+checks. [Run 34062409646](https://github.com/shyim/pox/actions/runs/34062409646) is
+verified active at that commit with the same native source SHA. The earlier
+five-job run remains active without a reported failure. See
+[start record](validation/http-musl-candidate-auth-start-2026-09-06.json).
+The corrected job results remain pending.
+
+## Fifty-third hardening pass: full authenticated candidate run
+
+The original Linux aarch64 candidate failed before native compilation: several
+dependency endpoints returned 502/504, GitHub API requests returned 403, and SPC's
+libcares fallback raised a filename-type error. This job predates the token
+correction. A full run of the corrected workflow is now dispatched at commit
+49a66ca9b34609851826c50e465ea7822a4c7d7c, still using native
+10c8b5d21b620c0e2e5868da28f526d0e1efd246.
+
+[Run 34062511910](https://github.com/shyim/pox/actions/runs/34062511910) is verified
+in progress with seven jobs. The authenticated musl-only run is also still
+building without a reported failure. Earlier in-progress jobs were not restarted
+because of observation timeouts. See
+[start record](validation/http-full-candidate-ci-start-2026-09-06.json).
+Remote platform success remains unproven until the actual test jobs finish.
+
+## Fifty-fourth hardening pass: remote recycling test and optional runtime version
+
+The original Darwin ARM candidate built successfully, then passed 58 HTTP tests
+and failed the recycling abandonment test with a 503 where 200 was expected.
+Its assertion helper did not identify the request phase. The test immediately
+checked recovery after releasing a paused bootstrap while retaining a 100 ms
+queue deadline. It now waits for independent admin readiness before that recovery
+request; abandonment deadlines and exact PHP side-effect checks remain intact.
+This addresses a startup timing race, but the Darwin result still needs rerunning.
+
+A local invocation without POX_PHP_RUNTIME also reproduced a startup panic from
+indexing absent PHP configuration in a server-only pox.toml. Version selection now
+uses optional lookup, with regression cases for empty, server-only, INI-only and
+explicit-version configurations. The full local suite passed 121 tests against
+the Bookworm PHP 8.5.9 library. See [validation record](validation/http-ci-recovery-fixes-2026-09-06.json).
+
+Both authenticated musl-only jobs progressed beyond native compilation into the
+Rust integration stage, establishing that the earlier dependency-download failure
+was cleared in those jobs. Remote test outcomes remain pending.

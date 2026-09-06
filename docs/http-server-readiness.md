@@ -21,8 +21,8 @@ snapshots, not cumulative totals or certification of later artifacts.
 | Other platforms | Release configurations include aarch64 and Darwin | Current execution evidence is missing. This Linux host has neither an aarch64 emulator nor a Darwin runner. |
 
 The HTTP server requires the updated sibling native runtime and its ABI
-capabilities. The checked-in sources and locally validated artifacts have not
-been published. A successful test against a local runtime does not prove that
+capabilities. The source changes are on codex/http-server-hardening review branches in both
+repositories; the native ABI changes and validated artifacts have not been released. A successful test against a local runtime does not prove that
 the default downloaded runtime can run this server.
 
 The process remains the isolation boundary for native crashes and nonreturning
@@ -36,10 +36,39 @@ dispatch. Supply the full lowercase 40-character pox-runtime commit SHA. It
 verifies that checkout, builds PHP 8.4.25/8.5.9 from the native source, then runs
 the HTTP-enabled suite. Linux builds use the Bookworm native Dockerfile and also
 run buffered/flushed load checks. The matrix includes Linux x86_64/aarch64 and
-Darwin x86_64/aarch64; it does not add musl CI execution.
+Darwin x86_64/aarch64; a separate candidate job now covers both musl architectures. Set musl_only
+to run only those jobs when extending an existing glibc/Darwin run.
 
 Omitting the input retains released-runtime installation for scheduled and
 release-triggered checks. Test logs, load reports and source/library provenance
 are uploaded as workflow artifacts. The revised workflow has passed static
-validation locally but has not executed remotely; the relevant source commits
-and workflow revision must be available on GitHub before it can run.
+validation locally and has started remotely; the initial [candidate run](https://github.com/shyim/pox/actions/runs/34062110978) is now in progress
+against Pox 785e7bd3df5fc0a8ad77cc0b5080e011a712ded2 and native
+10c8b5d21b620c0e2e5868da28f526d0e1efd246.
+
+The [musl candidate run](https://github.com/shyim/pox/actions/runs/34062300114)
+is in progress on the same native SHA. It builds PHP 8.5.9 in each native musl
+Dockerfile and runs the full HTTP suite and buffered/flushed load tests inside
+Alpine. Passing configuration checks or a started job does not establish a
+platform result; final job conclusions remain pending.
+
+The initial musl x86_64 job failed before compilation when dependency downloads
+received GitHub API HTTP 403. Candidate builds now receive the workflow's
+read-only token through the native Dockerfile's existing BuildKit secret (and
+through the process environment on macOS), matching native release builds.
+[The corrected musl run](https://github.com/shyim/pox/actions/runs/34062409646)
+is active. The initial five-job glibc/Darwin run continues independently.
+
+The original Linux aarch64 job also failed during dependency downloads, with
+HTTP 403 responses followed by an SPC fallback error. A [full corrected run](https://github.com/shyim/pox/actions/runs/34062511910)
+is active at Pox 49a66ca9b34609851826c50e465ea7822a4c7d7c and the same native
+commit. Its seven jobs cover glibc, musl and Darwin on both architectures (with
+PHP 8.4/8.5 coverage as listed in the matrix). This run is the current unified
+CI candidate; the earlier runs retain their individual, potentially failed results.
+
+The original Darwin ARM run completed native compilation but failed one HTTP
+recycling test (58 passed). The recovery assertion now waits for admin readiness
+after releasing replacement bootstrap. A separately reproduced panic when reading
+a server-only configuration is also fixed. The updated local suite passed 121
+tests against the Bookworm runtime; updated remote validation remains pending.
+See [recovery fixes](validation/http-ci-recovery-fixes-2026-09-06.json).
