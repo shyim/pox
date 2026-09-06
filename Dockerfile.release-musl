@@ -4,7 +4,10 @@ RUN apk add --no-cache build-base ca-certificates cmake git musl-dev perl pkgcon
 WORKDIR /work
 COPY . .
 ARG TARGET
+# The PHP runtime is a separate shared library; static musl cannot dlopen it.
+ENV RUSTFLAGS="-C target-feature=-crt-static"
 RUN rustup target add "${TARGET}"
+RUN cargo test -p pox-embed --test loader --locked --target "${TARGET}"
 RUN cargo build --release --locked --target "${TARGET}"
 RUN strip "target/${TARGET}/release/pox"
 RUN cp "target/${TARGET}/release/pox" /pox

@@ -1,0 +1,82 @@
+{
+  "provenance": {
+    "binary": {
+      "path": "/artifacts/pox",
+      "sha256": "6f6425f4c609ec723b035300dcb76047d8e0cb8e00c2458795bf0e0c75235559"
+    },
+    "runtime": {
+      "path": "/artifacts/libpox_php.so",
+      "sha256": "fa2863114a5065755bf401ce1122d935a83b26684ee77174d10ded8b37cbfc89"
+    },
+    "caddy": {
+      "path": "/caddy",
+      "sha256": "b7105518e3ed1c0761f232e44fc09345535533c9cb0abf0e12809416c7ac64d9"
+    },
+    "caddy_version": "v2.11.4 h1:XKxkMTgNSizEvKG6QHue6cAsFOteU2qA61w2tKkCWi0=",
+    "fault_extension_sha256": "83170ed7c6501575e3389acc8525bc5e3eae5c855d09fd96555471ebd31f9efc"
+  },
+  "results": [
+    {
+      "supervisor": "harness",
+      "supervisor_evidence": null,
+      "mode": "standard",
+      "passed": true,
+      "checks": [
+        "verified TLS",
+        "forwarding spoof rejection",
+        "binary request body",
+        "HTTP/2 frontend to HTTP/1.1 backend",
+        "private management listener",
+        "forced process loss produces 502",
+        "proxy recovery after backend restart",
+        "graceful TLS drain",
+        "early PHP flush through TLS",
+        "native extension memory fault produces SIGSEGV",
+        "native crash aborts committed TLS response"
+      ]
+    },
+    {
+      "supervisor": "harness",
+      "supervisor_evidence": null,
+      "mode": "worker",
+      "passed": true,
+      "checks": [
+        "verified TLS",
+        "forwarding spoof rejection",
+        "binary request body",
+        "HTTP/2 frontend to HTTP/1.1 backend",
+        "private management listener",
+        "forced process loss produces 502",
+        "proxy recovery after backend restart",
+        "graceful TLS drain",
+        "early PHP flush through TLS",
+        "native extension memory fault produces SIGSEGV",
+        "native crash aborts committed TLS response"
+      ]
+    }
+  ],
+  "fixture_build": {
+    "command": [
+      "cc",
+      "-shared",
+      "-fPIC",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wno-unused-parameter",
+      "-I/work/buildroot/include/php",
+      "-I/work/buildroot/include/php/main",
+      "-I/work/buildroot/include/php/TSRM",
+      "-I/work/buildroot/include/php/Zend",
+      "-I/work/buildroot/include/php/ext",
+      "-I/work/buildroot/include/php/ext/date/lib",
+      "/scripts/fixtures/php-native-fault.c",
+      "-o",
+      "/out/fault.so"
+    ],
+    "php_version": "8.5.9",
+    "compiler": "cc (Debian 12.2.0-14+deb12u1) 12.2.0",
+    "source_sha256": "a513b6db0d24dabecac7b6171ff985aed771d06f69e517de6af2b050d2e3e7f8",
+    "extension_sha256": "83170ed7c6501575e3389acc8525bc5e3eae5c855d09fd96555471ebd31f9efc"
+  }
+}

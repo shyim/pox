@@ -1,0 +1,38 @@
+{
+  "test": "malformed_framing_closes_without_executing_a_pipelined_request",
+  "platform": "Linux x86_64 glibc",
+  "cases_per_mode": 13,
+  "modes": [
+    "standard",
+    "worker"
+  ],
+  "checks": [
+    "One HTTP 400 response per malformed connection",
+    "No malformed or pipelined follow-up request reaches PHP",
+    "A fresh valid request succeeds afterward"
+  ],
+  "results": [
+    {
+      "php": "8.5.9",
+      "runtime_sha256": "b0e34385bb9fbc74ac59794a15843031df97696a2e25d257fc7952de8d45f83e",
+      "output": "   Compiling pox-cli v0.0.2 (/home/shyim/pox/crates/pox-cli)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.87s\n     Running tests/http_server.rs (target/debug/deps/http_server-952139d93467c269)\n\nrunning 1 test\ntest malformed_framing_closes_without_executing_a_pipelined_request ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 61 filtered out; finished in 0.08s\n\n",
+      "passed": true
+    },
+    {
+      "php": "8.4.25",
+      "runtime_sha256": "45097a83f24d70bac53dcf7c10977ac24b6724076b2a6ea94fffb320029d1adb",
+      "output": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.21s\n     Running tests/http_server.rs (target/debug/deps/http_server-952139d93467c269)\n\nrunning 1 test\ntest malformed_framing_closes_without_executing_a_pipelined_request ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 61 filtered out; finished in 0.08s\n\n",
+      "passed": true
+    }
+  ],
+  "binary_sha256": "5edc4a4cbb760b380626816eb49cf11634da88b25bd6f657971e0ab1eb21afc5",
+  "test_source_sha256": "9bf9d6b3e024e13d0b964bba230ccd1bbef8fe075ae881bb151c2c94e4d32fdc",
+  "limits": [
+    "Deterministic malformed-framing corpus, not exhaustive protocol fuzzing.",
+    "Targeted test only in this pass; no musl or non-Linux execution."
+  ],
+  "platform_availability": {
+    "aarch64": "No qemu-aarch64-static or registered binfmt interpreter; Docker builder reports amd64 variants only.",
+    "darwin": "No Darwin runner available on this Linux host."
+  }
+}

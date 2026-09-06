@@ -1,0 +1,376 @@
+{
+  "comparison": [
+    {
+      "body_bytes": 4096,
+      "clients": 16,
+      "elapsed_seconds": 7.55,
+      "errors": [],
+      "final": {
+        "fds": 15,
+        "rss_bytes": 45641728
+      },
+      "flush": true,
+      "initial": {
+        "fds": 15,
+        "rss_bytes": 44388352
+      },
+      "latency_histogram_relative_resolution": 0.01,
+      "latency_ms": {
+        "50": 3.574,
+        "95": 8.244,
+        "99": 11.111
+      },
+      "mode": "worker",
+      "passed": true,
+      "peak_rss_bytes": 45641728,
+      "provenance": {
+        "binary": "/tmp/pox-release-soak-20260906-vzajce_k/pox",
+        "binary_sha256": "7d297bf9d78e948b4f9bb8aa5134350fa6343ab1210b1b698bdd0a9510efb0ee",
+        "cpu_count": 16,
+        "harness_sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c",
+        "platform": "Linux-7.2.0-61.fc45.x86_64-x86_64-with-glibc2.44",
+        "python": "3.15.0rc1",
+        "runtime": "/tmp/pox-release-soak-20260906-vzajce_k/libpox_php.so",
+        "runtime_sha256": "b0e34385bb9fbc74ac59794a15843031df97696a2e25d257fc7952de8d45f83e",
+        "started_at_utc": "2026-09-06T20:03:13Z"
+      },
+      "recycle": 0,
+      "requested_count": 30000,
+      "requested_duration_seconds": 0,
+      "requests": 30000,
+      "requests_per_second": 3973.7,
+      "resource_bounds": {
+        "max_final_fds": 21,
+        "max_rss_growth_bytes": 67108864
+      },
+      "resource_samples": [
+        {
+          "elapsed_seconds": 0.1,
+          "failed_requests": 0,
+          "fds": 31,
+          "requests": 465,
+          "rss_bytes": 45326336,
+          "worker_replacements": 0
+        }
+      ],
+      "rss_growth_bytes": 1253376,
+      "shutdown_exit": 0,
+      "shutdown_seconds": 0.205,
+      "statuses": {
+        "200": 30000
+      },
+      "worker_replacements": 0,
+      "workers": 4
+    },
+    {
+      "body_bytes": 4096,
+      "clients": 16,
+      "elapsed_seconds": 74.773,
+      "errors": [],
+      "final": {
+        "fds": 11,
+        "rss_bytes": 57888768
+      },
+      "flush": true,
+      "initial": {
+        "fds": 15,
+        "rss_bytes": 44691456
+      },
+      "latency_histogram_relative_resolution": 0.01,
+      "latency_ms": {
+        "50": 4.963,
+        "95": 98.209,
+        "99": 101.185
+      },
+      "mode": "worker",
+      "passed": true,
+      "peak_rss_bytes": 57888768,
+      "provenance": {
+        "binary": "/tmp/pox-release-soak-20260906-vzajce_k/pox",
+        "binary_sha256": "7d297bf9d78e948b4f9bb8aa5134350fa6343ab1210b1b698bdd0a9510efb0ee",
+        "cpu_count": 16,
+        "harness_sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c",
+        "platform": "Linux-7.2.0-61.fc45.x86_64-x86_64-with-glibc2.44",
+        "python": "3.15.0rc1",
+        "runtime": "/tmp/pox-release-soak-20260906-vzajce_k/libpox_php.so",
+        "runtime_sha256": "b0e34385bb9fbc74ac59794a15843031df97696a2e25d257fc7952de8d45f83e",
+        "started_at_utc": "2026-09-06T20:03:13Z"
+      },
+      "recycle": 10,
+      "requested_count": 30000,
+      "requested_duration_seconds": 0,
+      "requests": 30000,
+      "requests_per_second": 401.2,
+      "resource_bounds": {
+        "max_final_fds": 21,
+        "max_rss_growth_bytes": 67108864
+      },
+      "resource_samples": [
+        {
+          "elapsed_seconds": 0.1,
+          "failed_requests": 0,
+          "fds": 27,
+          "requests": 48,
+          "rss_bytes": 45928448,
+          "worker_replacements": 4
+        },
+        {
+          "elapsed_seconds": 60.2,
+          "failed_requests": 0,
+          "fds": 27,
+          "requests": 24128,
+          "rss_bytes": 56709120,
+          "worker_replacements": 2412
+        }
+      ],
+      "rss_growth_bytes": 13197312,
+      "shutdown_exit": 0,
+      "shutdown_seconds": 0.21,
+      "statuses": {
+        "200": 30000
+      },
+      "worker_replacements": 3000,
+      "workers": 4
+    }
+  ],
+  "massif_run": {
+    "body_bytes": 4096,
+    "clients": 4,
+    "elapsed_seconds": 4.608,
+    "errors": [],
+    "final": {
+      "fds": 18,
+      "rss_bytes": 298242048
+    },
+    "flush": true,
+    "initial": {
+      "fds": 20,
+      "rss_bytes": 281915392
+    },
+    "latency_histogram_relative_resolution": 0.01,
+    "latency_ms": {
+      "50": 5.648,
+      "95": 87.156,
+      "99": 91.602
+    },
+    "mode": "worker",
+    "passed": true,
+    "peak_rss_bytes": 298242048,
+    "provenance": {
+      "binary": "/tmp/pox-massif-worker",
+      "binary_sha256": "68e9c6d564284a8d2e994c051c329f5ba27f673aad11bda5b5cfa49e1a42aba9",
+      "cpu_count": 16,
+      "harness_sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c",
+      "platform": "Linux-7.2.0-61.fc45.x86_64-x86_64-with-glibc2.44",
+      "python": "3.15.0rc1",
+      "runtime": "/tmp/pox-release-soak-20260906-vzajce_k/libpox_php.so",
+      "runtime_sha256": "b0e34385bb9fbc74ac59794a15843031df97696a2e25d257fc7952de8d45f83e",
+      "started_at_utc": "2026-09-06T20:06:00Z"
+    },
+    "recycle": 10,
+    "requested_count": 1000,
+    "requested_duration_seconds": 0,
+    "requests": 1000,
+    "requests_per_second": 217.0,
+    "resource_bounds": {
+      "max_final_fds": 24,
+      "max_rss_growth_bytes": 67108864
+    },
+    "resource_samples": [
+      {
+        "elapsed_seconds": 0.1,
+        "failed_requests": 0,
+        "fds": 22,
+        "requests": 4,
+        "rss_bytes": 289746944,
+        "worker_replacements": 2
+      }
+    ],
+    "rss_growth_bytes": 16326656,
+    "shutdown_exit": 0,
+    "shutdown_seconds": 0.275,
+    "statuses": {
+      "200": 1000
+    },
+    "worker_replacements": 100,
+    "workers": 2
+  },
+  "massif_snapshots": [
+    {
+      "index": 0,
+      "time": 0,
+      "mem_heap_B": 0,
+      "mem_heap_extra_B": 0
+    },
+    {
+      "index": 1,
+      "time": 29663136,
+      "mem_heap_B": 7502452,
+      "mem_heap_extra_B": 530812
+    },
+    {
+      "index": 2,
+      "time": 46540472,
+      "mem_heap_B": 7497405,
+      "mem_heap_extra_B": 532475
+    },
+    {
+      "index": 3,
+      "time": 61936712,
+      "mem_heap_B": 5752605,
+      "mem_heap_extra_B": 475803
+    },
+    {
+      "index": 4,
+      "time": 82524928,
+      "mem_heap_B": 6923713,
+      "mem_heap_extra_B": 528543
+    },
+    {
+      "index": 5,
+      "time": 112311432,
+      "mem_heap_B": 7519897,
+      "mem_heap_extra_B": 534639
+    },
+    {
+      "index": 6,
+      "time": 131418152,
+      "mem_heap_B": 7478266,
+      "mem_heap_extra_B": 533230
+    },
+    {
+      "index": 7,
+      "time": 152602848,
+      "mem_heap_B": 6039651,
+      "mem_heap_extra_B": 482221
+    },
+    {
+      "index": 8,
+      "time": 169465128,
+      "mem_heap_B": 7508591,
+      "mem_heap_extra_B": 535561
+    },
+    {
+      "index": 9,
+      "time": 190455400,
+      "mem_heap_B": 5416381,
+      "mem_heap_extra_B": 435323
+    },
+    {
+      "index": 10,
+      "time": 207179464,
+      "mem_heap_B": 7025675,
+      "mem_heap_extra_B": 531661
+    },
+    {
+      "index": 11,
+      "time": 222340544,
+      "mem_heap_B": 7425103,
+      "mem_heap_extra_B": 534497
+    },
+    {
+      "index": 12,
+      "time": 237260152,
+      "mem_heap_B": 5117529,
+      "mem_heap_extra_B": 430335
+    },
+    {
+      "index": 13,
+      "time": 259712472,
+      "mem_heap_B": 7535648,
+      "mem_heap_extra_B": 537816
+    },
+    {
+      "index": 14,
+      "time": 274650832,
+      "mem_heap_B": 5221410,
+      "mem_heap_extra_B": 432990
+    },
+    {
+      "index": 15,
+      "time": 289566664,
+      "mem_heap_B": 7485346,
+      "mem_heap_extra_B": 536854
+    },
+    {
+      "index": 16,
+      "time": 304516808,
+      "mem_heap_B": 6485543,
+      "mem_heap_extra_B": 486465
+    },
+    {
+      "index": 17,
+      "time": 319491736,
+      "mem_heap_B": 6485399,
+      "mem_heap_extra_B": 489009
+    },
+    {
+      "index": 18,
+      "time": 341926800,
+      "mem_heap_B": 6567080,
+      "mem_heap_extra_B": 487704
+    },
+    {
+      "index": 19,
+      "time": 356870808,
+      "mem_heap_B": 6340393,
+      "mem_heap_extra_B": 488399
+    },
+    {
+      "index": 20,
+      "time": 371786656,
+      "mem_heap_B": 7522014,
+      "mem_heap_extra_B": 540978
+    },
+    {
+      "index": 21,
+      "time": 386731472,
+      "mem_heap_B": 5469606,
+      "mem_heap_extra_B": 443946
+    },
+    {
+      "index": 22,
+      "time": 401651104,
+      "mem_heap_B": 7522487,
+      "mem_heap_extra_B": 541385
+    },
+    {
+      "index": 23,
+      "time": 416566952,
+      "mem_heap_B": 6647256,
+      "mem_heap_extra_B": 503824
+    },
+    {
+      "index": 24,
+      "time": 431737944,
+      "mem_heap_B": 6034761,
+      "mem_heap_extra_B": 486415
+    },
+    {
+      "index": 25,
+      "time": 446658640,
+      "mem_heap_B": 7525240,
+      "mem_heap_extra_B": 542584
+    },
+    {
+      "index": 26,
+      "time": 461631176,
+      "mem_heap_B": 5636650,
+      "mem_heap_extra_B": 470590
+    },
+    {
+      "index": 27,
+      "time": 474979792,
+      "mem_heap_B": 7570135,
+      "mem_heap_extra_B": 543929
+    },
+    {
+      "index": 28,
+      "time": 489895696,
+      "mem_heap_B": 5780169,
+      "mem_heap_extra_B": 486487
+    }
+  ],
+  "profiling_conditions": "USE_ZEND_ALLOC=0; Massif allocator accounting, not production allocator/RSS equivalence. Snapshot binary predates body metrics.",
+  "conclusion": "Replacement-heavy run retained more RSS. A small profile does not establish or exclude a long-term leak; sustained verification remains active."
+}

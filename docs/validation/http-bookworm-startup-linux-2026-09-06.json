@@ -1,0 +1,63 @@
+{
+  "provenance": {
+    "binary": {
+      "path": "/artifacts/pox",
+      "sha256": "6f6425f4c609ec723b035300dcb76047d8e0cb8e00c2458795bf0e0c75235559"
+    },
+    "runtime": {
+      "path": "/artifacts/libpox_php.so",
+      "sha256": "fa2863114a5065755bf401ce1122d935a83b26684ee77174d10ded8b37cbfc89"
+    },
+    "extension": {
+      "path": "/artifacts/startup-failure.so",
+      "sha256": "8d00028290c79294721a8c3fc1f3c8e97549d74c4f8ce55e1f25ec629a80b1f9"
+    },
+    "harness_sha256": "237b1093bc3d72d217953db387c8406f4ecaf400bf15f6a046c75c8401fd5734"
+  },
+  "results": [
+    {
+      "mode": "standard",
+      "passed": true,
+      "startup_exit": 254,
+      "failure_seconds": 0.028,
+      "listener_observed": false,
+      "failure_output": "{\"event\":\"php_error\",\"severity\":3,\"message\":\"PHP Fatal error:  Unable to start pox_test_startup_failure module in Unknown on line 0\\u000aStack trace:\\u000a#0 {main}\",\"truncated\":false}\n",
+      "fresh_process_recovered": true,
+      "recovery_shutdown_exit": 0
+    },
+    {
+      "mode": "worker",
+      "passed": true,
+      "startup_exit": 254,
+      "failure_seconds": 0.026,
+      "listener_observed": false,
+      "failure_output": "{\"event\":\"php_error\",\"severity\":3,\"message\":\"PHP Fatal error:  Unable to start pox_test_startup_failure module in Unknown on line 0\\u000aStack trace:\\u000a#0 {main}\",\"truncated\":false}\n",
+      "fresh_process_recovered": true,
+      "recovery_shutdown_exit": 0
+    }
+  ],
+  "fixture_build": {
+    "command": [
+      "cc",
+      "-shared",
+      "-fPIC",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wno-unused-parameter",
+      "-I/work/buildroot/include/php",
+      "-I/work/buildroot/include/php/main",
+      "-I/work/buildroot/include/php/TSRM",
+      "-I/work/buildroot/include/php/Zend",
+      "-I/work/buildroot/include/php/ext",
+      "-I/work/buildroot/include/php/ext/date/lib",
+      "/scripts/fixtures/php-startup-failure.c",
+      "-o",
+      "/out/startup-failure.so"
+    ],
+    "php_version": "8.5.9",
+    "compiler": "cc (Debian 12.2.0-14+deb12u1) 12.2.0",
+    "source_sha256": "6b13564299c794cc50265d6931c04133c718fb6045ccdce691abb78afa3c7bdd",
+    "extension_sha256": "8d00028290c79294721a8c3fc1f3c8e97549d74c4f8ce55e1f25ec629a80b1f9"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "provenance": {
+    "binary": {
+      "path": "/artifacts/pox",
+      "sha256": "6f6425f4c609ec723b035300dcb76047d8e0cb8e00c2458795bf0e0c75235559"
+    },
+    "runtime": {
+      "path": "/artifacts/libpox_php.so",
+      "sha256": "fa2863114a5065755bf401ce1122d935a83b26684ee77174d10ded8b37cbfc89"
+    },
+    "caddy": {
+      "path": "/caddy",
+      "sha256": "b7105518e3ed1c0761f232e44fc09345535533c9cb0abf0e12809416c7ac64d9"
+    },
+    "caddy_version": "v2.11.4 h1:XKxkMTgNSizEvKG6QHue6cAsFOteU2qA61w2tKkCWi0="
+  },
+  "results": [
+    {
+      "supervisor": "harness",
+      "supervisor_evidence": null,
+      "mode": "standard",
+      "passed": true,
+      "checks": [
+        "verified TLS",
+        "forwarding spoof rejection",
+        "binary request body",
+        "HTTP/2 frontend to HTTP/1.1 backend",
+        "private management listener",
+        "forced process loss produces 502",
+        "proxy recovery after backend restart",
+        "graceful TLS drain",
+        "early PHP flush through TLS"
+      ]
+    },
+    {
+      "supervisor": "harness",
+      "supervisor_evidence": null,
+      "mode": "worker",
+      "passed": true,
+      "checks": [
+        "verified TLS",
+        "forwarding spoof rejection",
+        "binary request body",
+        "HTTP/2 frontend to HTTP/1.1 backend",
+        "private management listener",
+        "forced process loss produces 502",
+        "proxy recovery after backend restart",
+        "graceful TLS drain",
+        "early PHP flush through TLS"
+      ]
+    }
+  ]
+}

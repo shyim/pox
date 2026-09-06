@@ -1,0 +1,22 @@
+{
+  "archive_sha256": "5e31a9ba60d9c6dde37e9ee935f5c421c46abf1d5355495e88525a89a95ec627",
+  "binary_sha256": "a1fdcd1c84a0a3f07032e5ada986a3c4bd5cce9f817f34166c176f81cf9584b0",
+  "packaging_script_sha256": "4ba52b2b74e9e225fa61515e328940395f96ab18debfee328e1b58ef04e96bcf",
+  "files": [
+    "LICENSE",
+    "README.md",
+    "pox"
+  ],
+  "binary_mode": "0755",
+  "archive_checksum_verified": true,
+  "notice_payload_matches": true,
+  "host_failure_exit": 127,
+  "host_failure": "scripts/package-release.sh: line 29: dist/pox: cannot execute: required file not found\n",
+  "container_result": "Packaged dist/pox-0.0.2-x86_64-unknown-linux-musl.tar.gz\n",
+  "extracted_binary_help_passed": true,
+  "actionlint_passed": true,
+  "limits": [
+    "Local reproduction using the current musl artifact; remote release workflow remains unexecuted.",
+    "No archive published."
+  ]
+}

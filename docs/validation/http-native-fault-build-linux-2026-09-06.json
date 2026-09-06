@@ -1,0 +1,24 @@
+{
+  "command": [
+    "cc",
+    "-shared",
+    "-fPIC",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wno-unused-parameter",
+    "-I/home/shyim/.local/share/pox/php-8.5-zts/buildroot/include/php",
+    "-I/home/shyim/.local/share/pox/php-8.5-zts/buildroot/include/php/main",
+    "-I/home/shyim/.local/share/pox/php-8.5-zts/buildroot/include/php/TSRM",
+    "-I/home/shyim/.local/share/pox/php-8.5-zts/buildroot/include/php/Zend",
+    "-I/home/shyim/.local/share/pox/php-8.5-zts/buildroot/include/php/ext",
+    "-I/home/shyim/.local/share/pox/php-8.5-zts/buildroot/include/php/ext/date/lib",
+    "/home/shyim/pox/scripts/fixtures/php-native-fault.c",
+    "-o",
+    "/tmp/pox-test-native-fault.so"
+  ],
+  "php_version": "8.5.9",
+  "compiler": "cc (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)",
+  "source_sha256": "a500310ae9648a97b95b53657da5353ccca9db3d60156833c5ac8ba7afd7f505",
+  "extension_sha256": "fab0bfd0d710a18bc6ffec9dba0b2fb5224b9247337fcc458e317053c93693a9"
+}

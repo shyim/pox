@@ -1,0 +1,15 @@
+{
+  "binary_sha256": "8189f8eaa42e25d4efd78dfcc1d10c1ceb55ead31c975c67e19ec8a301873f6d",
+  "runtime_archive_sha256": "6d3ff5b4a646c06c0d4b6cddb9dc932946a3c13834dec027d2f2337c419c6caf",
+  "runtime": "/tmp/pox-musl-loader-review/pox-php-8.5.9-r2-x86_64-unknown-linux-musl/libpox_php.so",
+  "exit": 1,
+  "stderr": "Error: failed to load POX_PHP_RUNTIME\n  Caused by: failed to load PHP runtime /tmp/pox-musl-loader-review/pox-php-8.5.9-r2-x86_64-unknown-linux-musl/libpox_php.so: Dynamic loading not supported\n  Caused by: Dynamic loading not supported\n",
+  "binary_release": "https://github.com/shyim/pox/releases/tag/v0.0.2",
+  "runtime_release": "https://github.com/shyim/pox-runtime/releases/tag/php-8.5.9-r2",
+  "corrected_loader_tests": {
+    "passed": 3,
+    "environment": "rust:1.98-alpine3.22",
+    "flags": "-C target-feature=-crt-static",
+    "scope": "versioned fake ABI library; full PHP HTTP validation pending"
+  }
+}

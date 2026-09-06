@@ -1,0 +1,94 @@
+[
+  {
+    "body_bytes": 4096,
+    "clients": 32,
+    "elapsed_seconds": 2.647,
+    "errors": [],
+    "final": {
+      "fds": 11,
+      "rss_bytes": 69869568
+    },
+    "initial": {
+      "fds": 11,
+      "rss_bytes": 67776512
+    },
+    "latency_ms": {
+      "50": 6.981,
+      "95": 18.138,
+      "99": 25.662
+    },
+    "mode": "standard",
+    "passed": true,
+    "peak_rss_bytes": 69869568,
+    "provenance": {
+      "binary": "/home/shyim/pox/target/debug/pox",
+      "binary_sha256": "390cbc854ba7c9f431681035897e48beee06761bf6150c41595641fcce5326bf",
+      "cpu_count": 16,
+      "platform": "Linux-7.2.0-61.fc45.x86_64-x86_64-with-glibc2.44",
+      "python": "3.15.0rc1",
+      "runtime": "/home/shyim/pox-runtime/build/libpox_php.so",
+      "runtime_sha256": "7abf1952c82323c84b12e735d9a2ca7ca09148de157b77f62e85fab4b106f611"
+    },
+    "recycle": 1000,
+    "requests": 10000,
+    "requests_per_second": 3777.8,
+    "resource_bounds": {
+      "max_final_fds": 21,
+      "max_rss_growth_bytes": 67108864
+    },
+    "rss_growth_bytes": 2093056,
+    "shutdown_exit": 0,
+    "shutdown_seconds": 0.411,
+    "statuses": {
+      "200": 10000
+    },
+    "worker_replacements": 0,
+    "workers": 8
+  },
+  {
+    "body_bytes": 4096,
+    "clients": 32,
+    "elapsed_seconds": 2.757,
+    "errors": [],
+    "final": {
+      "fds": 12,
+      "rss_bytes": 72798208
+    },
+    "initial": {
+      "fds": 19,
+      "rss_bytes": 67682304
+    },
+    "latency_ms": {
+      "50": 7.261,
+      "95": 18.542,
+      "99": 27.058
+    },
+    "mode": "worker",
+    "passed": true,
+    "peak_rss_bytes": 72798208,
+    "provenance": {
+      "binary": "/home/shyim/pox/target/debug/pox",
+      "binary_sha256": "390cbc854ba7c9f431681035897e48beee06761bf6150c41595641fcce5326bf",
+      "cpu_count": 16,
+      "platform": "Linux-7.2.0-61.fc45.x86_64-x86_64-with-glibc2.44",
+      "python": "3.15.0rc1",
+      "runtime": "/home/shyim/pox-runtime/build/libpox_php.so",
+      "runtime_sha256": "7abf1952c82323c84b12e735d9a2ca7ca09148de157b77f62e85fab4b106f611"
+    },
+    "recycle": 1000,
+    "requests": 10000,
+    "requests_per_second": 3626.7,
+    "resource_bounds": {
+      "max_final_fds": 29,
+      "max_rss_growth_bytes": 67108864
+    },
+    "rss_growth_bytes": 5115904,
+    "shutdown_exit": 0,
+    "shutdown_seconds": 0.412,
+    "statuses": {
+      "200": 10000
+    },
+    "worker_replacements": 8,
+    "workers": 8
+  }
+]

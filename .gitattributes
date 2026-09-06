@@ -1,0 +1,3 @@
+# Preserve generated profiler annotations verbatim.
+docs/validation/http-standard-callgrind-2026-09-06.txt whitespace=-blank-at-eol
+docs/validation/http-standard-callgrind-reused-threads-2026-09-06.txt whitespace=-blank-at-eol

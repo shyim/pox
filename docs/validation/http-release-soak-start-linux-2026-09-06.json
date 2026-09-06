@@ -1,0 +1,113 @@
+{
+  "snapshot_directory": "/tmp/pox-release-soak-20260906-vzajce_k",
+  "files": {
+    "pox": {
+      "source": "/home/shyim/pox/target/release/pox",
+      "snapshot": "/tmp/pox-release-soak-20260906-vzajce_k/pox",
+      "sha256": "7d297bf9d78e948b4f9bb8aa5134350fa6343ab1210b1b698bdd0a9510efb0ee"
+    },
+    "libpox_php.so": {
+      "source": "/home/shyim/pox-runtime/build/libpox_php.so",
+      "snapshot": "/tmp/pox-release-soak-20260906-vzajce_k/libpox_php.so",
+      "sha256": "b0e34385bb9fbc74ac59794a15843031df97696a2e25d257fc7952de8d45f83e"
+    },
+    "stress-http-server.py": {
+      "source": "/home/shyim/pox/scripts/stress-http-server.py",
+      "snapshot": "/tmp/pox-release-soak-20260906-vzajce_k/stress-http-server.py",
+      "sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c"
+    }
+  },
+  "duration_seconds_per_mode": 7200,
+  "clients_per_mode": 32,
+  "workers_per_mode": 8,
+  "flush": true,
+  "concurrent_modes": true,
+  "status": "running when observed; results and shutdown not yet verified",
+  "observed_at_utc": "2026-09-06T19:36:03Z",
+  "processes": [
+    {
+      "pid": 2507970,
+      "command": [
+        "python3",
+        "/tmp/pox-release-soak-20260906-vzajce_k/stress-http-server.py",
+        "--binary",
+        "/tmp/pox-release-soak-20260906-vzajce_k/pox",
+        "--runtime",
+        "/tmp/pox-release-soak-20260906-vzajce_k/libpox_php.so",
+        "--mode",
+        "standard",
+        "--duration-seconds",
+        "7200",
+        "--timeout",
+        "7300",
+        "--clients",
+        "32",
+        "--workers",
+        "8",
+        "--body-bytes",
+        "4096",
+        "--recycle",
+        "1000",
+        "--flush"
+      ]
+    },
+    {
+      "pid": 2507972,
+      "command": [
+        "python3",
+        "/tmp/pox-release-soak-20260906-vzajce_k/stress-http-server.py",
+        "--binary",
+        "/tmp/pox-release-soak-20260906-vzajce_k/pox",
+        "--runtime",
+        "/tmp/pox-release-soak-20260906-vzajce_k/libpox_php.so",
+        "--mode",
+        "worker",
+        "--duration-seconds",
+        "7200",
+        "--timeout",
+        "7300",
+        "--clients",
+        "32",
+        "--workers",
+        "8",
+        "--body-bytes",
+        "4096",
+        "--recycle",
+        "1000",
+        "--flush"
+      ]
+    },
+    {
+      "pid": 2507977,
+      "command": [
+        "/tmp/pox-release-soak-20260906-vzajce_k/pox",
+        "server",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "39693",
+        "--document-root",
+        "/tmp/pox-http-stress-b28pyvpe",
+        "--workers",
+        "8"
+      ]
+    },
+    {
+      "pid": 2507980,
+      "command": [
+        "/tmp/pox-release-soak-20260906-vzajce_k/pox",
+        "server",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "40041",
+        "--document-root",
+        "/tmp/pox-http-stress-57s5a1pb",
+        "--workers",
+        "8",
+        "--worker",
+        "/tmp/pox-http-stress-57s5a1pb/index.php"
+      ]
+    }
+  ]
+}

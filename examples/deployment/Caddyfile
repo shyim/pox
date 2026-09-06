@@ -1,0 +1,7 @@
+{$POX_SITE} {
+    reverse_proxy {$POX_UPSTREAM:127.0.0.1:8000} {
+        # Caddy sets X-Forwarded-For/Proto/Host. Pox derives the public port
+        # from that authority; do not retain a client-supplied port override.
+        header_up -X-Forwarded-Port
+    }
+}

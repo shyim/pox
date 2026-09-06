@@ -1,11 +1,19 @@
-name: Released runtime integration
+name: Runtime integration
 
 on:
   schedule:
     - cron: '43 5 * * *'
   workflow_dispatch:
+    inputs:
+      runtime_source_ref:
+        description: 'Optional full pox-runtime commit SHA to build instead of installing a release'
+        type: string
+        default: ''
   repository_dispatch:
     types: [pox-runtime-released]
+
+permissions:
+  contents: read
 
 jobs:
   integration:
@@ -14,34 +22,122 @@ jobs:
       matrix:
         include:
           - php: '8.4'
+            php_patch: '8.4.25'
+            target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
           - php: '8.5'
+            php_patch: '8.5.9'
+            target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
+          - php: '8.5'
+            php_patch: '8.5.9'
+            target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
           - php: '8.4'
+            php_patch: '8.4.25'
+            target: x86_64-apple-darwin
             runner: macos-15-intel
           - php: '8.5'
+            php_patch: '8.5.9'
+            target: aarch64-apple-darwin
             runner: macos-15
     runs-on: ${{ matrix.runner }}
     env:
       XDG_DATA_HOME: /tmp/pox-data
       XDG_CACHE_HOME: /tmp/pox-cache
       XDG_CONFIG_HOME: /tmp/pox-config
+      RUNTIME_SOURCE_REF: ${{ inputs.runtime_source_ref || '' }}
     steps:
       - uses: actions/checkout@v6
-      - if: runner.os == 'macOS'
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.0
       - name: Build Pox without PHP development files
         run: cargo build --workspace --locked
+      - name: Validate native source revision
+        if: env.RUNTIME_SOURCE_REF != ''
+        shell: bash
+        run: |
+          if [[ ! "$RUNTIME_SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'runtime_source_ref must be a full lowercase commit SHA' >&2
+            exit 1
+          fi
+      - name: Check out pinned native source
+        if: env.RUNTIME_SOURCE_REF != ''
+        uses: actions/checkout@v6
+        with:
+          repository: shyim/pox-runtime
+          ref: ${{ inputs.runtime_source_ref }}
+          path: native-source
+          persist-credentials: false
+      - name: Verify checked-out native revision
+        if: env.RUNTIME_SOURCE_REF != ''
+        shell: bash
+        run: test "$(git -C native-source rev-parse HEAD)" = "$RUNTIME_SOURCE_REF"
+      - name: Build Linux native candidate
+        if: env.RUNTIME_SOURCE_REF != '' && runner.os == 'Linux'
+        shell: bash
+        env:
+          PHP_VERSION: ${{ matrix.php_patch }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          docker build --target builder --file native-source/Dockerfile.glibc \
+            --build-arg PHP_VERSION --build-arg TARGET \
+            --build-arg "RUNTIME_REVISION=ci-$RUNTIME_SOURCE_REF" \
+            --tag pox-native-candidate native-source
+          mkdir -p native-artifacts
+          docker run --rm --volume "$PWD/native-artifacts:/out" pox-native-candidate \
+            sh -ec 'cd /work; bash tests/smoke.sh; cp build/libpox_php.so /out/'
+          echo "POX_PHP_RUNTIME=$PWD/native-artifacts/libpox_php.so" >> "$GITHUB_ENV"
+      - name: Install macOS native prerequisites
+        if: env.RUNTIME_SOURCE_REF != '' && runner.os == 'macOS'
+        run: brew install autoconf automake bison cmake coreutils gnu-sed libtool pkg-config re2c zstd
+      - name: Build macOS native candidate
+        if: env.RUNTIME_SOURCE_REF != '' && runner.os == 'macOS'
+        working-directory: native-source
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '13.0'
+          PHP_VERSION: ${{ matrix.php_patch }}
+          TARGET: ${{ matrix.target }}
+          SPC_CONCURRENCY: '4'
+        run: |
+          export RUNTIME_REVISION="ci-$RUNTIME_SOURCE_REF"
+          ./scripts/build-php-runtime.sh
+          bash tests/smoke.sh
+          echo "POX_PHP_RUNTIME=$PWD/build/libpox_php.dylib" >> "$GITHUB_ENV"
       - name: Install and select released runtime
+        if: env.RUNTIME_SOURCE_REF == ''
         run: |
           target/debug/pox php install "${{ matrix.php }}"
           target/debug/pox php use "${{ matrix.php }}" --global
           target/debug/pox php current
-      - name: Run CLI, web, worker, and Riff integration tests
+          echo "POX_PHP_RUNTIME=$(target/debug/pox php current | sed -n 's/^Library: //p')" >> "$GITHUB_ENV"
+      - name: Record native artifact provenance
+        shell: bash
         run: |
-          POX_PHP_RUNTIME="$(target/debug/pox php current | sed -n 's/^Library: //p')"
-          export POX_PHP_RUNTIME
-          cargo test --workspace --all-targets --features pox-embed/runtime-integration --locked -- --test-threads=1
+          mkdir -p validation
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, platform
+          runtime = pathlib.Path(os.environ['POX_PHP_RUNTIME'])
+          record = dict(pox_commit=os.environ['GITHUB_SHA'],
+                        runtime_source_commit=os.environ['RUNTIME_SOURCE_REF'] or None,
+                        runtime_sha256=hashlib.sha256(runtime.read_bytes()).hexdigest(),
+                        platform=platform.platform())
+          pathlib.Path('validation/runtime.json').write_text(json.dumps(record, indent=2) + '\n')
+          PY
+      - name: Run CLI, web, worker, and Riff integration tests
+        shell: bash
+        run: |
+          cargo test --workspace --all-targets --features pox-cli/runtime-integration --locked -- --test-threads=1 2>&1 | tee validation/tests.log
           target/debug/pox -r 'exit(PHP_ZTS ? 0 : 1);'
+          if [ "${{ runner.os }}" = Linux ]; then
+            python3 scripts/stress-http-server.py --binary target/debug/pox --runtime "$POX_PHP_RUNTIME" --requests 5000 --clients 16 --workers 4 --recycle 200 | tee validation/load.jsonl
+            python3 scripts/stress-http-server.py --binary target/debug/pox --runtime "$POX_PHP_RUNTIME" --requests 5000 --clients 16 --workers 4 --recycle 200 --flush | tee validation/load-flush.jsonl
+          fi
+      - name: Upload runtime provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-provenance-${{ matrix.php }}-${{ matrix.target }}
+          path: validation/
+          if-no-files-found: warn

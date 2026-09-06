@@ -1,0 +1,37 @@
+{
+  "builder_image": "pox-local-glibc-release-review",
+  "image_id": "sha256:d32b2116e01aa8e287bda2e6d9bc8feabfd6dd60f6a00271992cc2a949289f13",
+  "binary_sha256": "6f6425f4c609ec723b035300dcb76047d8e0cb8e00c2458795bf0e0c75235559",
+  "loader_tests_passed": 3,
+  "release_build_seconds": 428.5,
+  "glibc_symbol_versions": [
+    "GLIBC_2.2.5",
+    "GLIBC_2.3",
+    "GLIBC_2.3.2",
+    "GLIBC_2.3.4",
+    "GLIBC_2.4",
+    "GLIBC_2.6",
+    "GLIBC_2.7",
+    "GLIBC_2.9",
+    "GLIBC_2.10",
+    "GLIBC_2.12",
+    "GLIBC_2.14",
+    "GLIBC_2.15",
+    "GLIBC_2.16",
+    "GLIBC_2.17",
+    "GLIBC_2.18",
+    "GLIBC_2.25",
+    "GLIBC_2.27",
+    "GLIBC_2.28",
+    "GLIBC_2.29",
+    "GLIBC_2.30"
+  ],
+  "dependencies": "\tlinux-vdso.so.1 (0x00007f763dba8000)\n\tliblzma.so.5 => /lib/x86_64-linux-gnu/liblzma.so.5 (0x00007f763c8bf000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f763c8b9000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f763c89f000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f763c87d000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f763c739000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f763c565000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f763dbaa000)\n",
+  "minimal_bullseye_help_passed": true,
+  "host_php_execution": "8.5.9",
+  "limits": [
+    "PHP execution used the existing host-built native runtime on the host.",
+    "Bookworm native-runtime build is pending; this result does not establish the release pair.",
+    "No remote CI, aarch64 or Darwin execution; no publication."
+  ]
+}

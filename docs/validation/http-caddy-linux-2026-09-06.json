@@ -1,0 +1,47 @@
+{
+  "provenance": {
+    "binary": {
+      "path": "/home/shyim/pox/target/debug/pox",
+      "sha256": "390cbc854ba7c9f431681035897e48beee06761bf6150c41595641fcce5326bf"
+    },
+    "runtime": {
+      "path": "/home/shyim/pox-runtime/build/libpox_php.so",
+      "sha256": "7abf1952c82323c84b12e735d9a2ca7ca09148de157b77f62e85fab4b106f611"
+    },
+    "caddy": {
+      "path": "/tmp/pox-caddy-validation/caddy",
+      "sha256": "b7105518e3ed1c0761f232e44fc09345535533c9cb0abf0e12809416c7ac64d9"
+    },
+    "caddy_version": "v2.11.4 h1:XKxkMTgNSizEvKG6QHue6cAsFOteU2qA61w2tKkCWi0="
+  },
+  "results": [
+    {
+      "mode": "standard",
+      "passed": true,
+      "checks": [
+        "verified TLS",
+        "forwarding spoof rejection",
+        "binary request body",
+        "HTTP/2 frontend to HTTP/1.1 backend",
+        "private management listener",
+        "forced process loss produces 502",
+        "proxy recovery after backend restart",
+        "graceful TLS drain"
+      ]
+    },
+    {
+      "mode": "worker",
+      "passed": true,
+      "checks": [
+        "verified TLS",
+        "forwarding spoof rejection",
+        "binary request body",
+        "HTTP/2 frontend to HTTP/1.1 backend",
+        "private management listener",
+        "forced process loss produces 502",
+        "proxy recovery after backend restart",
+        "graceful TLS drain"
+      ]
+    }
+  ]
+}

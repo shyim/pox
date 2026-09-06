@@ -1,0 +1,60 @@
+--------------------------------------------------------------------------------
+Profile data file '/tmp/pox-http-callgrind.2441410' (creator: callgrind-3.27.1)
+--------------------------------------------------------------------------------
+I1 cache: 
+D1 cache: 
+LL cache: 
+Timerange: Basic block 0 - 225950576
+Trigger: Program termination
+Profiled target:  /home/shyim/pox/target/release/pox server --host 127.0.0.1 --port 56129 --document-root /tmp/pox-http-stress-siahqu57 --workers 2 (PID 2441410, part 1)
+Events recorded:  Ir
+Events shown:     Ir
+Event sort order: Ir
+Thresholds:       90
+Include dirs:     
+User annotated:   
+Auto-annotation:  off
+
+--------------------------------------------------------------------------------
+Ir                   
+--------------------------------------------------------------------------------
+812,891,681 (100.0%)  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+Ir                    file:function
+--------------------------------------------------------------------------------
+781,269,168 (96.11%)  ???:start_thread [/usr/lib64/libc.so.6]
+781,036,959 (96.08%)  /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/std/src/sys/thread/unix.rs:<std::sys::thread::unix::Thread>::new::thread_start [/home/shyim/pox/target/release/pox]
+781,012,260 (96.08%)  /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/alloc/src/boxed.rs:<std::sys::thread::unix::Thread>::new::thread_start
+738,507,432 (90.85%)  /home/shyim/.rustup/toolchains/1.98.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:<std::thread::lifecycle::spawn_unchecked<<pox::server::execution::Executor>::start::{closure#0}::{closure#0}::{closure#7}::{closure#0}, ()>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} [/home/shyim/pox/target/release/pox]
+738,507,033 (90.85%)  /home/shyim/.rustup/toolchains/1.98.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/lifecycle.rs:<std::thread::lifecycle::spawn_unchecked<<pox::server::execution::Executor>::start::{closure#0}::{closure#0}::{closure#7}::{closure#0}, ()>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+738,506,383 (90.85%)  /home/shyim/.rustup/toolchains/1.98.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:std::sys::backtrace::__rust_begin_short_backtrace::<<pox::server::execution::Executor>::start::{closure#0}::{closure#0}::{closure#7}::{closure#0}, ()> [/home/shyim/pox/target/release/pox]
+736,741,629 (90.63%)  crates/pox-embed/src/lib.rs:std::sys::backtrace::__rust_begin_short_backtrace::<<pox::server::execution::Executor>::start::{closure#0}::{closure#0}::{closure#7}::{closure#0}, ()>
+735,804,786 (90.52%)  ???:pox_abi_web_execute [/home/shyim/pox-runtime/build/libpox_php.so]
+735,801,978 (90.52%)  ???:pox_abi_web_execute.part.0 [/home/shyim/pox-runtime/build/libpox_php.so]
+734,466,653 (90.35%)  ???:pox_web_execute [/home/shyim/pox-runtime/build/libpox_php.so]
+529,898,341 (65.19%)  /home/shyim/.local/share/pox/php-8.5-zts/source/php-src/TSRM/TSRM.c:ts_resource_ex [/home/shyim/pox-runtime/build/libpox_php.so]
+529,874,315 (65.18%)  ???:ts_resource_ex
+529,777,290 (65.17%)  ???:allocate_new_resource [/home/shyim/pox-runtime/build/libpox_php.so]
+267,902,582 (32.96%)  /home/shyim/.local/share/pox/php-8.5-zts/source/php-src/Zend/zend_hash.c:zend_hash_copy
+267,902,582 (32.96%)  ???:zend_hash_copy [/home/shyim/pox-runtime/build/libpox_php.so]
+224,829,407 (27.66%)  /home/shyim/.local/share/pox/php-8.5-zts/source/php-src/ext/openssl/openssl.c:zm_globals_ctor_openssl
+224,829,407 (27.66%)  ???:zm_globals_ctor_openssl [/home/shyim/pox-runtime/build/libpox_php.so]
+224,828,535 (27.66%)  /home/shyim/.local/share/pox/php-8.5-zts/source/php-src/ext/openssl/openssl_backend_v3.c:php_openssl_backend_init_libctx [/home/shyim/pox-runtime/build/libpox_php.so]
+224,827,881 (27.66%)  ???:php_openssl_backend_init_libctx
+214,420,598 (26.38%)  ???:CONF_modules_load_file_ex [/home/shyim/pox-runtime/build/libpox_php.so]
+204,027,621 (25.10%)  /home/shyim/.local/share/pox/php-8.5-zts/source/php-src/Zend/zend_constants.c:zend_copy_constants
+204,027,621 (25.10%)  ???:zend_copy_constants [/home/shyim/pox-runtime/build/libpox_php.so]
+202,373,100 (24.90%)  /home/shyim/.local/share/pox/php-8.5-zts/source/php-src/Zend/zend.c:executor_globals_ctor
+164,670,396 (20.26%)  ???:malloc [/usr/lib64/libc.so.6]
+159,912,880 (19.67%)  ???:NCONF_load [/home/shyim/pox-runtime/build/libpox_php.so]
+159,912,004 (19.67%)  ???:def_load [/home/shyim/pox-runtime/build/libpox_php.so]
+159,505,740 (19.62%)  ???:def_load_bio [/home/shyim/pox-runtime/build/libpox_php.so]
+149,102,579 (18.34%)  ???:free [/usr/lib64/libc.so.6]
+144,490,673 (17.77%)  /home/shyim/.local/share/pox/php-8.5-zts/source/php-src/TSRM/TSRM.c:ts_free_thread [/home/shyim/pox-runtime/build/libpox_php.so]
+144,488,297 (17.77%)  ???:ts_free_thread
+144,448,002 (17.77%)  ???:ts_free_resources [/home/shyim/pox-runtime/build/libpox_php.so]
+141,828,848 (17.45%)  ???:__libc_malloc2 [/usr/lib64/libc.so.6]
+136,213,801 (16.76%)  /home/shyim/.local/share/pox/php-8.5-zts/source/php-src/Zend/zend_hash.c:zend_hash_destroy
+
+Profile scope: release Pox, 200 requests plus 16 warmup requests, two PHP threads, four clients; includes process startup/shutdown. Ir is instruction count, not elapsed time. The workload passed under instrumentation.

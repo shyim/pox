@@ -1,0 +1,82 @@
+[
+  {
+    "php": "8.4.25",
+    "provenance": {
+      "binary": {
+        "path": "/home/shyim/pox/target/debug/pox",
+        "sha256": "5edc4a4cbb760b380626816eb49cf11634da88b25bd6f657971e0ab1eb21afc5"
+      },
+      "runtime": {
+        "path": "/home/shyim/pox-runtime/build-php84/libpox_php.so",
+        "sha256": "45097a83f24d70bac53dcf7c10977ac24b6724076b2a6ea94fffb320029d1adb"
+      },
+      "extension": {
+        "path": "/tmp/pox-startup-failure-84.so",
+        "sha256": "a37b9e0c6eb0ee87103c841e6af49929e51cb2e3cbeb7ac2c41635f9aa1f4878"
+      },
+      "harness_sha256": "237b1093bc3d72d217953db387c8406f4ecaf400bf15f6a046c75c8401fd5734"
+    },
+    "results": [
+      {
+        "mode": "standard",
+        "passed": true,
+        "startup_exit": 254,
+        "failure_seconds": 0.028,
+        "listener_observed": false,
+        "failure_output": "{\"event\":\"php_error\",\"severity\":3,\"message\":\"PHP Fatal error:  Unable to start pox_test_startup_failure module in Unknown on line 0\",\"truncated\":false}\n",
+        "fresh_process_recovered": true,
+        "recovery_shutdown_exit": 0
+      },
+      {
+        "mode": "worker",
+        "passed": true,
+        "startup_exit": 254,
+        "failure_seconds": 0.026,
+        "listener_observed": false,
+        "failure_output": "{\"event\":\"php_error\",\"severity\":3,\"message\":\"PHP Fatal error:  Unable to start pox_test_startup_failure module in Unknown on line 0\",\"truncated\":false}\n",
+        "fresh_process_recovered": true,
+        "recovery_shutdown_exit": 0
+      }
+    ]
+  },
+  {
+    "php": "8.5.9",
+    "provenance": {
+      "binary": {
+        "path": "/home/shyim/pox/target/debug/pox",
+        "sha256": "5edc4a4cbb760b380626816eb49cf11634da88b25bd6f657971e0ab1eb21afc5"
+      },
+      "runtime": {
+        "path": "/home/shyim/pox-runtime/build/libpox_php.so",
+        "sha256": "b0e34385bb9fbc74ac59794a15843031df97696a2e25d257fc7952de8d45f83e"
+      },
+      "extension": {
+        "path": "/tmp/pox-startup-failure.so",
+        "sha256": "eed420014d86257a3b426976f640bd8e2661997acf1472af71268187cabc09ed"
+      },
+      "harness_sha256": "237b1093bc3d72d217953db387c8406f4ecaf400bf15f6a046c75c8401fd5734"
+    },
+    "results": [
+      {
+        "mode": "standard",
+        "passed": true,
+        "startup_exit": 254,
+        "failure_seconds": 0.033,
+        "listener_observed": false,
+        "failure_output": "{\"event\":\"php_error\",\"severity\":3,\"message\":\"PHP Fatal error:  Unable to start pox_test_startup_failure module in Unknown on line 0\\u000aStack trace:\\u000a#0 {main}\",\"truncated\":false}\n",
+        "fresh_process_recovered": true,
+        "recovery_shutdown_exit": 0
+      },
+      {
+        "mode": "worker",
+        "passed": true,
+        "startup_exit": 254,
+        "failure_seconds": 0.031,
+        "listener_observed": false,
+        "failure_output": "{\"event\":\"php_error\",\"severity\":3,\"message\":\"PHP Fatal error:  Unable to start pox_test_startup_failure module in Unknown on line 0\\u000aStack trace:\\u000a#0 {main}\",\"truncated\":false}\n",
+        "fresh_process_recovered": true,
+        "recovery_shutdown_exit": 0
+      }
+    ]
+  }
+]

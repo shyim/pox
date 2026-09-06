@@ -1,0 +1,101 @@
+{
+  "date": "2026-09-06",
+  "build": "cargo build -p pox-cli --release --locked (configured LTO enabled)",
+  "runtime": "PHP 8.5.9 ZTS, local uncommitted ABI 1.1 runtime with reusable web threads",
+  "command": "python3 scripts/stress-http-server.py --requests 100000 --clients 32 --workers 8 --timeout 180",
+  "reports": [
+    {
+      "body_bytes": 4096,
+      "clients": 32,
+      "elapsed_seconds": 35.6,
+      "errors": [],
+      "final": {
+        "fds": 11,
+        "rss_bytes": 50450432
+      },
+      "initial": {
+        "fds": 11,
+        "rss_bytes": 48119808
+      },
+      "latency_ms": {
+        "50": 9.632,
+        "95": 25.599,
+        "99": 35.495
+      },
+      "mode": "standard",
+      "passed": true,
+      "peak_rss_bytes": 50450432,
+      "provenance": {
+        "binary": "/home/shyim/pox/target/release/pox",
+        "binary_sha256": "2649eda301d0ea5385915db09bce23bf98245b590ac74e7ea376be653f4eb302",
+        "cpu_count": 16,
+        "platform": "Linux-7.2.0-61.fc45.x86_64-x86_64-with-glibc2.44",
+        "python": "3.15.0rc1",
+        "runtime": "/home/shyim/pox-runtime/build/libpox_php.so",
+        "runtime_sha256": "8ea26dbb0f3526f443d853a0d164aec89ed34948473321a1dfed295fa2d0159c"
+      },
+      "recycle": 1000,
+      "requests": 100000,
+      "requests_per_second": 2809.0,
+      "resource_bounds": {
+        "max_final_fds": 21,
+        "max_rss_growth_bytes": 67108864
+      },
+      "rss_growth_bytes": 2330624,
+      "shutdown_exit": 0,
+      "shutdown_seconds": 0.41,
+      "statuses": {
+        "200": 100000
+      },
+      "worker_replacements": 0,
+      "workers": 8
+    },
+    {
+      "body_bytes": 4096,
+      "clients": 32,
+      "elapsed_seconds": 31.817,
+      "errors": [],
+      "final": {
+        "fds": 11,
+        "rss_bytes": 60035072
+      },
+      "initial": {
+        "fds": 19,
+        "rss_bytes": 48386048
+      },
+      "latency_ms": {
+        "50": 8.271,
+        "95": 24.309,
+        "99": 34.531
+      },
+      "mode": "worker",
+      "passed": true,
+      "peak_rss_bytes": 60035072,
+      "provenance": {
+        "binary": "/home/shyim/pox/target/release/pox",
+        "binary_sha256": "2649eda301d0ea5385915db09bce23bf98245b590ac74e7ea376be653f4eb302",
+        "cpu_count": 16,
+        "platform": "Linux-7.2.0-61.fc45.x86_64-x86_64-with-glibc2.44",
+        "python": "3.15.0rc1",
+        "runtime": "/home/shyim/pox-runtime/build/libpox_php.so",
+        "runtime_sha256": "8ea26dbb0f3526f443d853a0d164aec89ed34948473321a1dfed295fa2d0159c"
+      },
+      "recycle": 1000,
+      "requests": 100000,
+      "requests_per_second": 3142.9,
+      "resource_bounds": {
+        "max_final_fds": 29,
+        "max_rss_growth_bytes": 67108864
+      },
+      "rss_growth_bytes": 11649024,
+      "shutdown_exit": 0,
+      "shutdown_seconds": 0.415,
+      "statuses": {
+        "200": 100000
+      },
+      "worker_replacements": 96,
+      "workers": 8
+    }
+  ],
+  "limits": "Local loopback workload only; not a maximum-throughput benchmark or a production-readiness completion claim."
+}

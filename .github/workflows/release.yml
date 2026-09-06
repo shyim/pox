@@ -118,6 +118,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: '13.0'
           TARGET: ${{ matrix.target }}
         run: |
+          cargo test -p pox-embed --test loader --locked --target "${TARGET}"
           cargo build --release --locked --target "${TARGET}"
           strip "target/${TARGET}/release/pox"
           mkdir -p dist
@@ -128,11 +129,16 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          dist/pox --help >/dev/null
+          if [[ "${TARGET}" == *-linux-musl ]]; then
+            docker run --rm --volume "$PWD/dist:/dist:ro" alpine:3.22 \
+              sh -ec 'apk add --no-cache libgcc >/dev/null; /dist/pox --help >/dev/null'
+          else
+            dist/pox --help >/dev/null
+          fi
           file dist/pox
 
-          if [[ "${TARGET}" == *-linux-musl ]] && ! file dist/pox | grep -Eq 'static-pie linked|statically linked'; then
-            echo "${TARGET} must produce a statically linked portable binary" >&2
+          if [[ "${TARGET}" == *-linux-musl ]] && ! readelf -l dist/pox | grep -q '/lib/ld-musl-'; then
+            echo "${TARGET} must use the musl dynamic loader so PHP runtime loading works" >&2
             exit 1
           fi
 
@@ -142,7 +148,15 @@ jobs:
           POX_BINARY: dist/pox
           TARGET: ${{ matrix.target }}
           VERSION: ${{ needs.metadata.outputs.version }}
-        run: ./scripts/package-release.sh
+        run: |
+          if [[ "${TARGET}" == *-linux-musl ]]; then
+            # The packager also executes --help; its libc must match the binary.
+            docker run --rm --volume "$PWD:/work" --workdir /work \
+              --env POX_BINARY --env TARGET --env VERSION alpine:3.22 \
+              sh -ec 'apk add --no-cache bash libgcc >/dev/null; bash scripts/package-release.sh'
+          else
+            ./scripts/package-release.sh
+          fi
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
