@@ -83,10 +83,12 @@ jobs:
         if: env.RUNTIME_SOURCE_REF != '' && runner.os == 'Linux'
         shell: bash
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           PHP_VERSION: ${{ matrix.php_patch }}
           TARGET: ${{ matrix.target }}
         run: |
           docker build --target builder --file native-source/Dockerfile.glibc \
+            --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN \
             --build-arg PHP_VERSION --build-arg TARGET \
             --build-arg "RUNTIME_REVISION=ci-$RUNTIME_SOURCE_REF" \
             --tag pox-native-candidate native-source
@@ -101,6 +103,7 @@ jobs:
         if: env.RUNTIME_SOURCE_REF != '' && runner.os == 'macOS'
         working-directory: native-source
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           MACOSX_DEPLOYMENT_TARGET: '13.0'
           PHP_VERSION: ${{ matrix.php_patch }}
           TARGET: ${{ matrix.target }}
@@ -179,9 +182,12 @@ jobs:
           persist-credentials: false
       - name: Build musl native candidate
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           test "$(git -C native-source rev-parse HEAD)" = "$RUNTIME_SOURCE_REF"
           docker build --target builder --file native-source/Dockerfile.musl \
+            --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN \
             --build-arg PHP_VERSION --build-arg TARGET \
             --build-arg "RUNTIME_REVISION=ci-$RUNTIME_SOURCE_REF" \
             --tag pox-native-candidate native-source
