@@ -1,6 +1,6 @@
 # Current HTTP readiness evidence
 
-Production hardening remains in progress. This summary groups the latest local
+Production hardening remains in progress. This summary groups local and remote
 evidence; the [review ledger](http-server-review.md) preserves the comparison
 with FrankenPHP and the implementation history. Historical pass counts are
 snapshots, not cumulative totals or certification of later artifacts.
@@ -10,7 +10,7 @@ snapshots, not cumulative totals or certification of later artifacts.
 | Linux glibc PHP 8.5.9 host build | [119-test full suite](validation/http-shutdown-reload-linux-2026-09-06.json), then [targeted framing corpus](validation/http-framing-corpus-linux-2026-09-06.json) | The local native library requires glibc through 2.44; the separately built Bookworm runtime now passes [native and minimal-container checks](validation/http-glibc-release-native-linux-2026-09-06.json). See [baseline evidence](validation/http-local-glibc-baseline-linux-2026-09-06.json). |
 | Linux glibc PHP 8.5.9 release pair | [120-test suite against the Bookworm library on the host](validation/http-bookworm-native-suite-linux-2026-09-06.json); [Bookworm release load](validation/http-bookworm-release-load-linux-2026-09-06.json), [native faults](validation/http-bookworm-native-fault-linux-2026-09-06.json), [15 systemd checks per mode](validation/http-bookworm-systemd-linux-2026-09-06.json) and [startup failure](validation/http-bookworm-startup-linux-2026-09-06.json) | Systemd tests use the host user manager; no publication or real host boot validation. |
 | Linux glibc PHP 8.4.25 | [117-test full suite](validation/http-php84-runtime-linux-2026-09-06.json), then targeted [reload](validation/http-repeated-reload-linux-2026-09-06.json), [shutdown overlap](validation/http-shutdown-reload-linux-2026-09-06.json) and [framing](validation/http-framing-corpus-linux-2026-09-06.json) tests | Local SDK uses dynamic C++ linkage; this is not a published release validation. |
-| Linux musl PHP 8.5.9 | [120-test current full suite](validation/http-musl-current-suite-linux-2026-09-06.json), [minimal Alpine execution](validation/http-musl-runtime-linux-2026-09-06.json) | Local execution only; no remote CI or publication. |
+| Linux musl PHP 8.5.9 | [120-test current full suite](validation/http-musl-current-suite-linux-2026-09-06.json), [minimal Alpine execution](validation/http-musl-runtime-linux-2026-09-06.json) | Both architectures also passed [preceding-revision CI](validation/http-ci-authenticated-platforms-2026-09-06.json); the [corrected native matrix passed](validation/http-ci-full-matrix-2026-09-06.json); no publication claim. |
 | Native startup failure | [glibc PHP 8.4/8.5](validation/http-startup-repeatable-linux-2026-09-06.json) and [musl PHP 8.5](validation/http-musl-startup-recovery-linux-2026-09-06.json) process failure and fresh-process recovery | MINIT failure exits PHP. Same-process recovery after a returned partial-initialization failure is unverified. |
 | TLS, crash recovery and shutdown | [15 checks per mode under a glibc user systemd manager](validation/http-current-release-deployment-linux-2026-09-06.json); [11 musl checks per mode in an unprivileged read-only container](validation/http-unprivileged-container-linux-2026-09-06.json) | Host system-service boot/account setup, public ACME and multi-host deployment remain unverified. |
 | Release load | 100,000 flushed requests per mode on [glibc](validation/http-current-release-load-linux-2026-09-06.json) and [musl](validation/http-musl-load-linux-2026-09-06.json), with response/resource bounds and clean shutdown | Runs shared the host; throughput is not an isolated comparison. |
@@ -29,66 +29,56 @@ The process remains the isolation boundary for native crashes and nonreturning
 native code. The tested cancellation and deadline behavior does not establish
 that arbitrary PHP extensions can be interrupted safely within a thread.
 
+## Current candidate validation
+
+The current pair is Pox `1efbd9946d8523bd314b795da1d56e9887fbc7c9` and native
+`28da99e2b32667845ea9aafdfa631fa0f65d3829`, validated by
+[run 34063460630](https://github.com/shyim/pox/actions/runs/34063460630).
+The rebuilt native library passed [122 local tests](validation/http-platform-timer-fix-2026-09-06.json).
+Darwin ARM PHP 8.5.9 passed [119 applicable tests](validation/http-ci-timer-darwin-arm-2026-09-06.json),
+including timer-policy, shutdown-cancellation and reusable-thread isolation.
+Both musl architectures passed [122 tests and 20,000 load requests each](validation/http-ci-timer-musl-linux-2026-09-06.json),
+with no errors and clean shutdowns. [Glibc ARM also passed 122 tests and 20,000 requests](validation/http-ci-timer-glibc-arm-2026-09-06.json).
+[Darwin Intel passed all 119 applicable tests](validation/http-ci-timer-darwin-intel-2026-09-06.json),
+including the previously failing reusable-thread check. Both x86_64 glibc jobs also passed [122 tests and 20,000 requests each](validation/http-ci-timer-glibc-x86-2026-09-06.json).
+The [full seven-job matrix passed](validation/http-ci-full-matrix-2026-09-06.json):
+848 test executions and 100,000 Linux load requests. This validates source-built
+candidates; it does not publish or deploy them.
+
+Earlier native `10c8b5d` candidates passed 120 tests and 20,000 load requests per
+job on [glibc x86_64 PHP 8.4/8.5 and ARM PHP 8.5](validation/http-ci-glibc-platforms-2026-09-06.json)
+and [both musl architectures](validation/http-ci-authenticated-platforms-2026-09-06.json).
+These results predate the latest changes. Earlier runs also exposed dependency
+download failures, two test synchronization problems, and an intermittent
+Darwin Intel PHP timer failure. The [review ledger](http-server-review.md)
+records their individual outcomes and fixes.
+
+HTTP startup now disables PHP's process-wide timers on ZTS builds without Zend
+per-thread timers, following FrankenPHP's policy. Pox request deadlines remain
+active. Both corrected Darwin jobs passed the platform policy and reusable-thread
+checks. These single-suite results do not establish absence of all intermittent
+failures. The [deployment guide](http-server-deployment.md)
+explains the application constraints.
+
 ## Testing an unpublished native revision in CI
 
-The runtime-integration workflow accepts an optional runtime_source_ref on manual
-dispatch. Supply the full lowercase 40-character pox-runtime commit SHA. It
-verifies that checkout, builds PHP 8.4.25/8.5.9 from the native source, then runs
-the HTTP-enabled suite. Linux builds use the Bookworm native Dockerfile and also
-run buffered/flushed load checks. The matrix includes Linux x86_64/aarch64 and
-Darwin x86_64/aarch64; a separate candidate job now covers both musl architectures. Set musl_only
-to run only those jobs when extending an existing glibc/Darwin run.
+The runtime-integration workflow accepts an optional `runtime_source_ref` on
+manual dispatch. Supply the full lowercase 40-character pox-runtime commit SHA.
+It verifies that checkout and builds PHP 8.4.25/8.5.9 from native source. The
+matrix covers glibc, musl and Darwin on x86_64/aarch64, with PHP versions as
+listed in the workflow. Linux jobs run buffered and flushed load checks in
+addition to the full runtime suite. Set `musl_only` to run just the musl jobs.
 
 Omitting the input retains released-runtime installation for scheduled and
-release-triggered checks. Test logs, load reports and source/library provenance
-are uploaded as workflow artifacts. The revised workflow has passed static
-validation locally and has started remotely; the initial [candidate run](https://github.com/shyim/pox/actions/runs/34062110978) is now in progress
-against Pox 785e7bd3df5fc0a8ad77cc0b5080e011a712ded2 and native
-10c8b5d21b620c0e2e5868da28f526d0e1efd246.
+release-triggered checks. Native dependency downloads use the workflow's
+read-only GitHub token through BuildKit secrets or the macOS process environment.
+Test logs, load reports and source/library provenance are uploaded as workflow
+artifacts. Dispatching this workflow does not publish a release.
 
-The [musl candidate run](https://github.com/shyim/pox/actions/runs/34062300114)
-is in progress on the same native SHA. It builds PHP 8.5.9 in each native musl
-Dockerfile and runs the full HTTP suite and buffered/flushed load tests inside
-Alpine. Passing configuration checks or a started job does not establish a
-platform result; final job conclusions remain pending.
+## Generated framing checks
 
-The initial musl x86_64 job failed before compilation when dependency downloads
-received GitHub API HTTP 403. Candidate builds now receive the workflow's
-read-only token through the native Dockerfile's existing BuildKit secret (and
-through the process environment on macOS), matching native release builds.
-[The corrected musl run](https://github.com/shyim/pox/actions/runs/34062409646)
-is active. The initial five-job glibc/Darwin run continues independently.
-
-The original Linux aarch64 job also failed during dependency downloads, with
-HTTP 403 responses followed by an SPC fallback error. A [full corrected run](https://github.com/shyim/pox/actions/runs/34062511910)
-is active at Pox 49a66ca9b34609851826c50e465ea7822a4c7d7c and the same native
-commit. Its seven jobs cover glibc, musl and Darwin on both architectures (with
-PHP 8.4/8.5 coverage as listed in the matrix). This run is the current unified
-CI candidate; the earlier runs retain their individual, potentially failed results.
-
-The original Darwin ARM run completed native compilation but failed one HTTP
-recycling test (58 passed). The recovery assertion now waits for admin readiness
-after releasing replacement bootstrap. A separately reproduced panic when reading
-a server-only configuration is also fixed. The updated local suite passed 121
-tests against the Bookworm runtime; updated remote validation remains pending.
-See [recovery fixes](validation/http-ci-recovery-fixes-2026-09-06.json).
-
-The initial ARM musl job completed successfully: 120 tests and four 5,000-request
-load checks (buffered/flushed, standard/worker), with no errors and clean shutdowns.
-The overall run failed on the separate x86_64 download job. See [ARM musl evidence](validation/http-ci-musl-arm-linux-2026-09-06.json).
-The latest Pox commit 3cfef6d95bd1af1009879872064e087d765bb73d is dispatched in
-[run 34063032366](https://github.com/shyim/pox/actions/runs/34063032366), using the
-same native commit, to validate the optional-version fix and readiness-synchronized
-recycling test across the full matrix. Its results remain pending.
-
-Authenticated musl CI passed on both architectures: 120 tests and 20,000 load
-requests per job, without errors and with clean shutdowns. Darwin ARM passed
-117 applicable tests on Pox 49a66ca; its prior recycling failure did not recur.
-These are preceding-commit results, with the latest full matrix still running.
-See [platform evidence](validation/http-ci-authenticated-platforms-2026-09-06.json).
-
-A separate Darwin Intel run exposed a premature PHP execution timeout during
-thread reuse. Native HTTP startup now disables process-wide PHP timers where
-Zend per-thread timers are unavailable, following FrankenPHP. The rebuilt local
-library passed 122 tests; corrected remote platform results remain pending.
-See [timer validation](validation/http-platform-timer-fix-2026-09-06.json).
+[The seeded framing harness](../scripts/fuzz-http-framing.py) passed
+[1,024 cases per mode](validation/http-generated-framing-linux-2026-09-06.json)
+against the current local native build. Every malformed framing request was
+rejected without executing its pipelined PHP request, followed by a successful
+healthy request. This is targeted generated testing, not exhaustive protocol fuzzing.

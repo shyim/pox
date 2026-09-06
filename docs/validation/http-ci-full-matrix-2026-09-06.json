@@ -1,0 +1,52 @@
+{
+  "run_url": "https://github.com/shyim/pox/actions/runs/34063460630",
+  "pox_commit": "1efbd9946d8523bd314b795da1d56e9887fbc7c9",
+  "native_commit": "28da99e2b32667845ea9aafdfa631fa0f65d3829",
+  "jobs": [
+    {
+      "id": 101568023482,
+      "name": "musl_candidate (x86_64-unknown-linux-musl, ubuntu-24.04)",
+      "conclusion": "success"
+    },
+    {
+      "id": 101568023580,
+      "name": "integration (8.5, 8.5.9, aarch64-apple-darwin, macos-15)",
+      "conclusion": "success"
+    },
+    {
+      "id": 101568023597,
+      "name": "integration (8.5, 8.5.9, aarch64-unknown-linux-gnu, ubuntu-24.04-arm)",
+      "conclusion": "success"
+    },
+    {
+      "id": 101568023617,
+      "name": "musl_candidate (aarch64-unknown-linux-musl, ubuntu-24.04-arm)",
+      "conclusion": "success"
+    },
+    {
+      "id": 101568023637,
+      "name": "integration (8.4, 8.4.25, x86_64-apple-darwin, macos-15-intel)",
+      "conclusion": "success"
+    },
+    {
+      "id": 101568023675,
+      "name": "integration (8.4, 8.4.25, x86_64-unknown-linux-gnu, ubuntu-24.04)",
+      "conclusion": "success"
+    },
+    {
+      "id": 101568023745,
+      "name": "integration (8.5, 8.5.9, x86_64-unknown-linux-gnu, ubuntu-24.04)",
+      "conclusion": "success"
+    }
+  ],
+  "tests_passed_across_jobs": 848,
+  "linux_load_requests": 100000,
+  "evidence_files": [
+    "http-ci-timer-darwin-arm-2026-09-06.json",
+    "http-ci-timer-darwin-intel-2026-09-06.json",
+    "http-ci-timer-musl-linux-2026-09-06.json",
+    "http-ci-timer-glibc-arm-2026-09-06.json",
+    "http-ci-timer-glibc-x86-2026-09-06.json"
+  ],
+  "scope": "Source-built candidates; no release publication or actual deployment claim."
+}

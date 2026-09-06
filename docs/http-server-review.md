@@ -1,6 +1,6 @@
 # HTTP server production-readiness review
 
-Status: in progress. This document is a completion checklist, not a production certification.
+Status: server implementation and full source-candidate CI validated; target deployment checks remain open. See the [current completion audit](http-server-completion-audit.md). Historical gate statements below are superseded only by the explicit evidence in that audit.
 
 Reference: FrankenPHP cloned at `/tmp/pox-frankenphp-review`, revision
 `2e3342762be51f4f635b5457899c6743ec999ef8` (2026-09-06).
@@ -1415,3 +1415,73 @@ The rebuilt local native library passed its smoke test and all 122 Rust/runtime
 tests. The no-per-thread-timer branch passed strict C syntax validation using a
 forced include that undefines the feature macro. This does not substitute for
 Darwin execution. See [timer validation](validation/http-platform-timer-fix-2026-09-06.json).
+
+## Fifty-seventh hardening pass: glibc platform evidence
+
+The original x86_64 glibc jobs completed successfully for PHP 8.4.25 and 8.5.9.
+The authenticated ARM glibc PHP 8.5.9 job also passed. Each job ran 120 tests
+and four 5,000-request load checks with no errors and clean exits. These jobs
+use native 10c8b5d and predate the latest fixes; their overall runs contain
+other failed jobs. See [glibc evidence](validation/http-ci-glibc-platforms-2026-09-06.json).
+
+The latest pair, Pox 1efbd9946d8523bd314b795da1d56e9887fbc7c9 and native
+28da99e2b32667845ea9aafdfa631fa0f65d3829, is running in all seven jobs of
+[run 34063460630](https://github.com/shyim/pox/actions/runs/34063460630).
+No corrected macOS runtime result is claimed yet.
+
+The second Darwin Intel job (101565426228, run 34062511910) reproduced the
+same empty-response failure during reusable-thread execution on native 10c8b5d,
+with premature 30-second timeout messages. This strengthens the reproduction
+evidence; corrected native behavior is still pending.
+
+## Fifty-eighth hardening pass: corrected Darwin ARM validation
+
+The corrected native 28da99e and Pox 1efbd99 pair passed all 119 applicable
+tests on Darwin ARM PHP 8.5.9 in job 101568023580. The platform INI test,
+shutdown-cancellation test and reusable-thread isolation test all passed.
+Darwin Intel and the remaining matrix jobs are still pending. See
+[corrected ARM evidence](validation/http-ci-timer-darwin-arm-2026-09-06.json).
+
+## Fifty-ninth hardening pass: corrected musl validation
+
+Both musl jobs in current run 34063460630 passed 122 tests and four 5,000-request
+load checks each, with no errors and clean exits. These validate Pox 1efbd99 and
+native 28da99e. See [corrected musl evidence](validation/http-ci-timer-musl-linux-2026-09-06.json).
+The readiness summary now separates the current candidate from historical
+results instead of retaining obsolete in-progress status paragraphs.
+
+## Sixtieth hardening pass: corrected Darwin Intel and glibc ARM
+
+Darwin Intel PHP 8.4.25 passed all 119 applicable tests on the corrected native
+28da99e/Pox 1efbd99 pair, including the previously failing reusable-thread
+isolation check, timer-policy regression and shutdown-cancellation test.
+Glibc ARM passed 122 tests and four 5,000-request load checks with no errors
+and clean exits. See [Intel evidence](validation/http-ci-timer-darwin-intel-2026-09-06.json)
+and [glibc ARM evidence](validation/http-ci-timer-glibc-arm-2026-09-06.json).
+The two x86_64 glibc jobs remain live; full-matrix validation is still pending.
+
+## Sixty-first hardening pass: full corrected candidate matrix passed
+
+Run 34063460630 completed successfully on all seven jobs at Pox 1efbd99 and
+native 28da99e. The final x86_64 glibc PHP 8.4.25 and 8.5.9 jobs each passed
+122 tests and four 5,000-request load checks. Across the matrix, five Linux
+jobs passed 122 tests each and two Darwin jobs passed 119 applicable tests each:
+848 test executions and 100,000 Linux load requests, with no load errors and
+clean shutdowns. See [full matrix evidence](validation/http-ci-full-matrix-2026-09-06.json)
+and [final glibc evidence](validation/http-ci-timer-glibc-x86-2026-09-06.json).
+This is source-candidate validation, not release publication or deployment.
+
+## Sixty-second hardening pass: generated framing validation
+
+`scripts/fuzz-http-framing.py` generates a seeded corpus of invalid numeric
+Content-Length values, conflicting duplicate lengths and malformed chunk sizes.
+Each malformed request includes a pipelined PHP request; the harness requires
+exactly one 400 response, connection termination and no PHP side effect. It
+then requires a fresh healthy request and checks its exact side effect.
+Both modes passed 1,024 generated cases each against the current local native
+28da99e build, with clean shutdowns. This broadens the fixed corpus without
+claiming exhaustive fuzzing. See [generated framing evidence](validation/http-generated-framing-linux-2026-09-06.json).
+
+Strict workspace/all-target Clippy with runtime-integration enabled also passed
+on the current source. The final completion audit is reconciling the original
+comparison table with the measured platform, load and deployment evidence.

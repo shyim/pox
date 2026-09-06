@@ -1,0 +1,519 @@
+{
+  "run_url": "https://github.com/shyim/pox/actions/runs/34063460630",
+  "pox_commit": "1efbd9946d8523bd314b795da1d56e9887fbc7c9",
+  "native_commit": "28da99e2b32667845ea9aafdfa631fa0f65d3829",
+  "jobs": [
+    {
+      "job": 101568023675,
+      "php": "8.4.25",
+      "platform": "x86_64-unknown-linux-gnu",
+      "tests_passed": 122,
+      "loads": [
+        {
+          "body_bytes": 4096,
+          "clients": 16,
+          "elapsed_seconds": 2.124,
+          "errors": [],
+          "final": {
+            "fds": 10,
+            "rss_bytes": 66240512
+          },
+          "flush": false,
+          "initial": {
+            "fds": 10,
+            "rss_bytes": 65531904
+          },
+          "latency_histogram_relative_resolution": 0.01,
+          "latency_ms": {
+            "50": 6.239,
+            "95": 12.397,
+            "99": 15.741
+          },
+          "mode": "standard",
+          "passed": true,
+          "peak_rss_bytes": 66240512,
+          "provenance": {
+            "binary": "/home/runner/work/pox/pox/target/debug/pox",
+            "binary_sha256": "a2071ce541cc0bf9a3ec08a8cfc1937b7b0f238a95128656c9972db7405668ce",
+            "cpu_count": 4,
+            "harness_sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c",
+            "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+            "python": "3.12.3",
+            "runtime": "/home/runner/work/pox/pox/native-artifacts/libpox_php.so",
+            "runtime_sha256": "f5a8e932d1b46030ab655c6a01c18b82688d0421a5ae440de3d2091446222c38",
+            "started_at_utc": "2026-09-06T22:40:25Z"
+          },
+          "recycle": 200,
+          "requested_count": 5000,
+          "requested_duration_seconds": 0,
+          "requests": 5000,
+          "requests_per_second": 2354.1,
+          "resource_bounds": {
+            "max_final_fds": 16,
+            "max_rss_growth_bytes": 67108864
+          },
+          "resource_samples": [
+            {
+              "elapsed_seconds": 0.1,
+              "failed_requests": 0,
+              "fds": 26,
+              "requests": 231,
+              "rss_bytes": 66150400,
+              "worker_replacements": 0
+            }
+          ],
+          "rss_growth_bytes": 708608,
+          "shutdown_exit": 0,
+          "shutdown_seconds": 0.214,
+          "statuses": {
+            "200": 5000
+          },
+          "worker_replacements": 0,
+          "workers": 4
+        },
+        {
+          "body_bytes": 4096,
+          "clients": 16,
+          "elapsed_seconds": 2.161,
+          "errors": [],
+          "final": {
+            "fds": 14,
+            "rss_bytes": 66928640
+          },
+          "flush": false,
+          "initial": {
+            "fds": 14,
+            "rss_bytes": 65658880
+          },
+          "latency_histogram_relative_resolution": 0.01,
+          "latency_ms": {
+            "50": 5.592,
+            "95": 11.448,
+            "99": 58.539
+          },
+          "mode": "worker",
+          "passed": true,
+          "peak_rss_bytes": 66928640,
+          "provenance": {
+            "binary": "/home/runner/work/pox/pox/target/debug/pox",
+            "binary_sha256": "a2071ce541cc0bf9a3ec08a8cfc1937b7b0f238a95128656c9972db7405668ce",
+            "cpu_count": 4,
+            "harness_sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c",
+            "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+            "python": "3.12.3",
+            "runtime": "/home/runner/work/pox/pox/native-artifacts/libpox_php.so",
+            "runtime_sha256": "f5a8e932d1b46030ab655c6a01c18b82688d0421a5ae440de3d2091446222c38",
+            "started_at_utc": "2026-09-06T22:40:25Z"
+          },
+          "recycle": 200,
+          "requested_count": 5000,
+          "requested_duration_seconds": 0,
+          "requests": 5000,
+          "requests_per_second": 2313.8,
+          "resource_bounds": {
+            "max_final_fds": 20,
+            "max_rss_growth_bytes": 67108864
+          },
+          "resource_samples": [
+            {
+              "elapsed_seconds": 0.1,
+              "failed_requests": 0,
+              "fds": 30,
+              "requests": 282,
+              "rss_bytes": 66293760,
+              "worker_replacements": 0
+            }
+          ],
+          "rss_growth_bytes": 1269760,
+          "shutdown_exit": 0,
+          "shutdown_seconds": 0.214,
+          "statuses": {
+            "200": 5000
+          },
+          "worker_replacements": 24,
+          "workers": 4
+        },
+        {
+          "body_bytes": 4096,
+          "clients": 16,
+          "elapsed_seconds": 2.377,
+          "errors": [],
+          "final": {
+            "fds": 10,
+            "rss_bytes": 66666496
+          },
+          "flush": true,
+          "initial": {
+            "fds": 10,
+            "rss_bytes": 65851392
+          },
+          "latency_histogram_relative_resolution": 0.01,
+          "latency_ms": {
+            "50": 7.031,
+            "95": 13.558,
+            "99": 17.215
+          },
+          "mode": "standard",
+          "passed": true,
+          "peak_rss_bytes": 66666496,
+          "provenance": {
+            "binary": "/home/runner/work/pox/pox/target/debug/pox",
+            "binary_sha256": "a2071ce541cc0bf9a3ec08a8cfc1937b7b0f238a95128656c9972db7405668ce",
+            "cpu_count": 4,
+            "harness_sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c",
+            "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+            "python": "3.12.3",
+            "runtime": "/home/runner/work/pox/pox/native-artifacts/libpox_php.so",
+            "runtime_sha256": "f5a8e932d1b46030ab655c6a01c18b82688d0421a5ae440de3d2091446222c38",
+            "started_at_utc": "2026-09-06T22:40:30Z"
+          },
+          "recycle": 200,
+          "requested_count": 5000,
+          "requested_duration_seconds": 0,
+          "requests": 5000,
+          "requests_per_second": 2103.3,
+          "resource_bounds": {
+            "max_final_fds": 16,
+            "max_rss_growth_bytes": 67108864
+          },
+          "resource_samples": [
+            {
+              "elapsed_seconds": 0.1,
+              "failed_requests": 0,
+              "fds": 26,
+              "requests": 246,
+              "rss_bytes": 66428928,
+              "worker_replacements": 0
+            }
+          ],
+          "rss_growth_bytes": 815104,
+          "shutdown_exit": 0,
+          "shutdown_seconds": 0.214,
+          "statuses": {
+            "200": 5000
+          },
+          "worker_replacements": 0,
+          "workers": 4
+        },
+        {
+          "body_bytes": 4096,
+          "clients": 16,
+          "elapsed_seconds": 2.332,
+          "errors": [],
+          "final": {
+            "fds": 14,
+            "rss_bytes": 67612672
+          },
+          "flush": true,
+          "initial": {
+            "fds": 14,
+            "rss_bytes": 65826816
+          },
+          "latency_histogram_relative_resolution": 0.01,
+          "latency_ms": {
+            "50": 6.824,
+            "95": 12.646,
+            "99": 16.876
+          },
+          "mode": "worker",
+          "passed": true,
+          "peak_rss_bytes": 67612672,
+          "provenance": {
+            "binary": "/home/runner/work/pox/pox/target/debug/pox",
+            "binary_sha256": "a2071ce541cc0bf9a3ec08a8cfc1937b7b0f238a95128656c9972db7405668ce",
+            "cpu_count": 4,
+            "harness_sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c",
+            "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+            "python": "3.12.3",
+            "runtime": "/home/runner/work/pox/pox/native-artifacts/libpox_php.so",
+            "runtime_sha256": "f5a8e932d1b46030ab655c6a01c18b82688d0421a5ae440de3d2091446222c38",
+            "started_at_utc": "2026-09-06T22:40:30Z"
+          },
+          "recycle": 200,
+          "requested_count": 5000,
+          "requested_duration_seconds": 0,
+          "requests": 5000,
+          "requests_per_second": 2144.5,
+          "resource_bounds": {
+            "max_final_fds": 20,
+            "max_rss_growth_bytes": 67108864
+          },
+          "resource_samples": [
+            {
+              "elapsed_seconds": 0.1,
+              "failed_requests": 0,
+              "fds": 30,
+              "requests": 219,
+              "rss_bytes": 66502656,
+              "worker_replacements": 0
+            }
+          ],
+          "rss_growth_bytes": 1785856,
+          "shutdown_exit": 0,
+          "shutdown_seconds": 0.214,
+          "statuses": {
+            "200": 5000
+          },
+          "worker_replacements": 24,
+          "workers": 4
+        }
+      ]
+    },
+    {
+      "job": 101568023745,
+      "php": "8.5.9",
+      "platform": "x86_64-unknown-linux-gnu",
+      "tests_passed": 122,
+      "loads": [
+        {
+          "body_bytes": 4096,
+          "clients": 16,
+          "elapsed_seconds": 2.06,
+          "errors": [],
+          "final": {
+            "fds": 11,
+            "rss_bytes": 71888896
+          },
+          "flush": false,
+          "initial": {
+            "fds": 11,
+            "rss_bytes": 71024640
+          },
+          "latency_histogram_relative_resolution": 0.01,
+          "latency_ms": {
+            "50": 5.936,
+            "95": 12.152,
+            "99": 15.898
+          },
+          "mode": "standard",
+          "passed": true,
+          "peak_rss_bytes": 71888896,
+          "provenance": {
+            "binary": "/home/runner/work/pox/pox/target/debug/pox",
+            "binary_sha256": "a2071ce541cc0bf9a3ec08a8cfc1937b7b0f238a95128656c9972db7405668ce",
+            "cpu_count": 4,
+            "harness_sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c",
+            "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+            "python": "3.12.3",
+            "runtime": "/home/runner/work/pox/pox/native-artifacts/libpox_php.so",
+            "runtime_sha256": "0f9d56560193b4ad83456b08a4dd36433ef04c623a7cc214bd83ecfd282a323a",
+            "started_at_utc": "2026-09-06T22:41:03Z"
+          },
+          "recycle": 200,
+          "requested_count": 5000,
+          "requested_duration_seconds": 0,
+          "requests": 5000,
+          "requests_per_second": 2426.8,
+          "resource_bounds": {
+            "max_final_fds": 17,
+            "max_rss_growth_bytes": 67108864
+          },
+          "resource_samples": [
+            {
+              "elapsed_seconds": 0.1,
+              "failed_requests": 0,
+              "fds": 27,
+              "requests": 260,
+              "rss_bytes": 71614464,
+              "worker_replacements": 0
+            }
+          ],
+          "rss_growth_bytes": 864256,
+          "shutdown_exit": 0,
+          "shutdown_seconds": 0.214,
+          "statuses": {
+            "200": 5000
+          },
+          "worker_replacements": 0,
+          "workers": 4
+        },
+        {
+          "body_bytes": 4096,
+          "clients": 16,
+          "elapsed_seconds": 2.211,
+          "errors": [],
+          "final": {
+            "fds": 12,
+            "rss_bytes": 72986624
+          },
+          "flush": false,
+          "initial": {
+            "fds": 15,
+            "rss_bytes": 70975488
+          },
+          "latency_histogram_relative_resolution": 0.01,
+          "latency_ms": {
+            "50": 5.428,
+            "95": 11.448,
+            "99": 65.963
+          },
+          "mode": "worker",
+          "passed": true,
+          "peak_rss_bytes": 72986624,
+          "provenance": {
+            "binary": "/home/runner/work/pox/pox/target/debug/pox",
+            "binary_sha256": "a2071ce541cc0bf9a3ec08a8cfc1937b7b0f238a95128656c9972db7405668ce",
+            "cpu_count": 4,
+            "harness_sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c",
+            "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+            "python": "3.12.3",
+            "runtime": "/home/runner/work/pox/pox/native-artifacts/libpox_php.so",
+            "runtime_sha256": "0f9d56560193b4ad83456b08a4dd36433ef04c623a7cc214bd83ecfd282a323a",
+            "started_at_utc": "2026-09-06T22:41:03Z"
+          },
+          "recycle": 200,
+          "requested_count": 5000,
+          "requested_duration_seconds": 0,
+          "requests": 5000,
+          "requests_per_second": 2261.5,
+          "resource_bounds": {
+            "max_final_fds": 21,
+            "max_rss_growth_bytes": 67108864
+          },
+          "resource_samples": [
+            {
+              "elapsed_seconds": 0.1,
+              "failed_requests": 0,
+              "fds": 31,
+              "requests": 272,
+              "rss_bytes": 71585792,
+              "worker_replacements": 0
+            }
+          ],
+          "rss_growth_bytes": 2011136,
+          "shutdown_exit": 0,
+          "shutdown_seconds": 0.214,
+          "statuses": {
+            "200": 5000
+          },
+          "worker_replacements": 24,
+          "workers": 4
+        },
+        {
+          "body_bytes": 4096,
+          "clients": 16,
+          "elapsed_seconds": 2.116,
+          "errors": [],
+          "final": {
+            "fds": 11,
+            "rss_bytes": 72232960
+          },
+          "flush": true,
+          "initial": {
+            "fds": 11,
+            "rss_bytes": 71032832
+          },
+          "latency_histogram_relative_resolution": 0.01,
+          "latency_ms": {
+            "50": 6.056,
+            "95": 12.9,
+            "99": 17.045
+          },
+          "mode": "standard",
+          "passed": true,
+          "peak_rss_bytes": 72232960,
+          "provenance": {
+            "binary": "/home/runner/work/pox/pox/target/debug/pox",
+            "binary_sha256": "a2071ce541cc0bf9a3ec08a8cfc1937b7b0f238a95128656c9972db7405668ce",
+            "cpu_count": 4,
+            "harness_sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c",
+            "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+            "python": "3.12.3",
+            "runtime": "/home/runner/work/pox/pox/native-artifacts/libpox_php.so",
+            "runtime_sha256": "0f9d56560193b4ad83456b08a4dd36433ef04c623a7cc214bd83ecfd282a323a",
+            "started_at_utc": "2026-09-06T22:41:09Z"
+          },
+          "recycle": 200,
+          "requested_count": 5000,
+          "requested_duration_seconds": 0,
+          "requests": 5000,
+          "requests_per_second": 2363.0,
+          "resource_bounds": {
+            "max_final_fds": 17,
+            "max_rss_growth_bytes": 67108864
+          },
+          "resource_samples": [
+            {
+              "elapsed_seconds": 0.1,
+              "failed_requests": 0,
+              "fds": 27,
+              "requests": 262,
+              "rss_bytes": 71647232,
+              "worker_replacements": 0
+            }
+          ],
+          "rss_growth_bytes": 1200128,
+          "shutdown_exit": 0,
+          "shutdown_seconds": 0.214,
+          "statuses": {
+            "200": 5000
+          },
+          "worker_replacements": 0,
+          "workers": 4
+        },
+        {
+          "body_bytes": 4096,
+          "clients": 16,
+          "elapsed_seconds": 1.982,
+          "errors": [],
+          "final": {
+            "fds": 11,
+            "rss_bytes": 73703424
+          },
+          "flush": true,
+          "initial": {
+            "fds": 15,
+            "rss_bytes": 71196672
+          },
+          "latency_histogram_relative_resolution": 0.01,
+          "latency_ms": {
+            "50": 5.762,
+            "95": 11.335,
+            "99": 14.828
+          },
+          "mode": "worker",
+          "passed": true,
+          "peak_rss_bytes": 73703424,
+          "provenance": {
+            "binary": "/home/runner/work/pox/pox/target/debug/pox",
+            "binary_sha256": "a2071ce541cc0bf9a3ec08a8cfc1937b7b0f238a95128656c9972db7405668ce",
+            "cpu_count": 4,
+            "harness_sha256": "5f65d69dc7d11fb9c05a53d18213f5b041770a548fb632c0474505214fb4195c",
+            "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+            "python": "3.12.3",
+            "runtime": "/home/runner/work/pox/pox/native-artifacts/libpox_php.so",
+            "runtime_sha256": "0f9d56560193b4ad83456b08a4dd36433ef04c623a7cc214bd83ecfd282a323a",
+            "started_at_utc": "2026-09-06T22:41:09Z"
+          },
+          "recycle": 200,
+          "requested_count": 5000,
+          "requested_duration_seconds": 0,
+          "requests": 5000,
+          "requests_per_second": 2523.3,
+          "resource_bounds": {
+            "max_final_fds": 21,
+            "max_rss_growth_bytes": 67108864
+          },
+          "resource_samples": [
+            {
+              "elapsed_seconds": 0.1,
+              "failed_requests": 0,
+              "fds": 31,
+              "requests": 275,
+              "rss_bytes": 71794688,
+              "worker_replacements": 0
+            }
+          ],
+          "rss_growth_bytes": 2506752,
+          "shutdown_exit": 0,
+          "shutdown_seconds": 0.214,
+          "statuses": {
+            "200": 5000
+          },
+          "worker_replacements": 23,
+          "workers": 4
+        }
+      ]
+    }
+  ]
+}

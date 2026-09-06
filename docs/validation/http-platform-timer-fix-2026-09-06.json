@@ -20,5 +20,15 @@
   "limitations": [
     "Darwin root cause is inferred from PHP timer implementation and FrankenPHP policy; corrected Darwin execution remains pending.",
     "Local native test library uses development-host SDK and is not a portable release artifact."
-  ]
+  ],
+  "additional_old_revision_reproduction": {
+    "run": 34062511910,
+    "job": 101565426228,
+    "test": "reusable_web_threads_keep_request_state_isolated_and_can_reattach",
+    "timeout_messages": [
+      "2026-09-06T22:17:06.8908880Z test reusable_web_threads_keep_request_state_isolated_and_can_reattach ... {\"event\":\"php_error\",\"severity\":3,\"message\":\"PHP Fatal error:  Maximum execution time of 30 seconds exceeded in /private/var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/.tmpM26FbG/index.php on line 1\",\"truncated\":false}",
+      "2026-09-06T22:17:06.8927610Z {\"event\":\"php_error\",\"severity\":3,\"message\":\"PHP Fatal error:  Maximum execution time of 30 seconds exceeded in /private/var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/.tmpM26FbG/index.php on line 1\",\"truncated\":false}"
+    ],
+    "scope": "Pre-fix native 10c8b5d; does not establish corrected behavior."
+  }
 }
