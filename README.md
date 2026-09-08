@@ -34,6 +34,8 @@ Version tags publish Pox archives for Linux glibc, Linux musl, and macOS on
 x86_64 and aarch64 to [GitHub Releases](https://github.com/shyim/pox/releases).
 Each archive contains the `pox` executable, this README, and the license. Verify
 the archive against `SHA256SUMS`, extract it, and place `pox` on your `PATH`.
+Linux glibc release builds use Debian 12 (Bookworm), matching the native runtime
+baseline; the combined Pox/PHP installation requires glibc 2.36 or newer.
 
 Pox does not bundle a particular PHP version. After installing the executable,
 install and select a signed PHP runtime independently:
