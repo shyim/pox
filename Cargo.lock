@@ -1926,7 +1926,7 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
 name = "pox-cli"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "anyhow",
  "base64",
@@ -1962,7 +1962,7 @@ dependencies = [
 
 [[package]]
 name = "pox-embed"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "libloading",
  "serde",
