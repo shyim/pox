@@ -33,7 +33,7 @@ multi-hour operation. Those remain separate deployment validation requirements.
 
 ## Local evidence, 2026-09-06
 
-The [release workload report](validation/http-load-linux-2026-09-06.json) includes
+The [release workload report](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-load-linux-2026-09-06.json) includes
 exact binary and runtime digests. Both modes used 32 clients, eight PHP threads,
 4 KiB request bodies and the default 1000-request recycling budget.
 
@@ -49,7 +49,7 @@ baseline also exposed 129 HTTP 503 responses in 2000 worker requests during norm
 recycling. After bounded queue waiting was implemented, that same workload
 completed with 2000 successful responses and eight replacements, without retries.
 
-A [Callgrind sample](validation/http-standard-callgrind-2026-09-06.txt) covering
+A [Callgrind sample](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-standard-callgrind-2026-09-06.txt) covering
 200 requests plus warmup attributes about 65% of recorded instructions to TSRM
 resource allocation and 18% to TSRM cleanup. These are inclusive instruction
 counts across the process, not wall-time percentages. Standard requests currently
@@ -60,7 +60,7 @@ was the measured optimization implemented and validated below.
 
 ## After reusable standard-thread resources
 
-The [new release report](validation/http-load-linux-reused-threads-2026-09-06.json)
+The [new release report](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-load-linux-reused-threads-2026-09-06.json)
 uses the same 100,000-request command, 32 clients, eight PHP threads, 4 KiB bodies
 and 180-second deadline. Both modes passed without retries or HTTP/data errors:
 
@@ -70,7 +70,7 @@ and 180-second deadline. Both modes passed without retries or HTTP/data errors:
 | Worker | 100,000 HTTP 200 | 31.8 s | 11.1 MiB | 96 | clean, exit 0 |
 
 Standard mode now keeps TSRM resources for each dispatch thread while retaining
-full PHP request startup/shutdown. The repeated [Callgrind sample](validation/http-standard-callgrind-reused-threads-2026-09-06.txt)
+full PHP request startup/shutdown. The repeated [Callgrind sample](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-standard-callgrind-reused-threads-2026-09-06.txt)
 shows about 3.4% of process instructions in thread resource allocation and 1.0%
 in cleanup, down from approximately 65% and 18%. These small profiles include
 startup/warmup and describe instruction counts, not wall-time attribution.
@@ -94,7 +94,7 @@ python3 scripts/stress-http-server.py --binary target/debug/pox \
 ```
 
 The current local result is recorded in
-[the streaming workload artifact](validation/http-load-linux-streaming-2026-09-06.json).
+[the streaming workload artifact](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-load-linux-streaming-2026-09-06.json).
 It is a debug-build correctness/resource workload, not a release performance
 comparison or a multi-hour soak.
 
@@ -134,14 +134,14 @@ throughput comparisons.
 
 ## Current release and recycling-memory check
 
-The [current release workload](validation/http-current-release-load-linux-2026-09-06.json)
+The [current release workload](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-current-release-load-linux-2026-09-06.json)
 includes body outcome metrics and premature-EOF accounting. Both modes passed
 100,000 flushed requests with 32 clients/eight PHP threads and clean shutdown.
-The [matching deployment suite](validation/http-current-release-deployment-linux-2026-09-06.json)
+The [matching deployment suite](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-current-release-deployment-linux-2026-09-06.json)
 passes all 15 checks per mode. These short runs do not replace the ongoing
 multi-hour snapshot workloads or establish isolated throughput improvements.
 
-A separate [memory comparison](validation/http-worker-recycle-memory-linux-2026-09-06.json)
+A separate [memory comparison](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-worker-recycle-memory-linux-2026-09-06.json)
 used 30,000 worker requests, 16 clients and four workers on the earlier snapshot.
 Disabling recycling produced 1.2 MiB final RSS growth; recycling every 10 requests
 produced 3000 replacements and 12.6 MiB growth. Both runs passed response/resource
@@ -153,5 +153,5 @@ disabled for allocation visibility. Its early high live-heap sample was 7.50 MB
 (decimal), versus a later peak of 7.57 MB. Heap usage fluctuated with active PHP
 threads. Instrumented RSS is not comparable to production RSS. This small profile
 does not prove or exclude a long-term leak, so no speculative runtime change was
-made. The [compressed raw profile](validation/http-worker-recycle-massif-linux-2026-09-06.out.gz)
+made. The [compressed raw profile](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-worker-recycle-massif-linux-2026-09-06.out.gz)
 and parsed samples are retained for follow-up if the sustained trend warrants it.

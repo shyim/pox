@@ -541,7 +541,7 @@ are recorded in the native cancellation report under `docs/validation`.
 Local validation passes: 100 workspace tests (47 HTTP, seven runtime modes),
 runtime-feature/all-target Clippy, native build/smoke/buffer tests and both patch
 checks. The focused Memcheck address/allocation run also passes within its stated
-limits. See [the cancellation evidence](validation/http-native-cancellation-linux-2026-09-06.md).
+limits. See [the cancellation evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-native-cancellation-linux-2026-09-06.md).
 The overall production-readiness goal remains incomplete.
 
 
@@ -576,7 +576,7 @@ The current debug binary also passes 10,000 requests per mode with 32 clients,
 eight PHP threads and 4-KiB bodies: only verified 200 responses, bounded RSS/file
 descriptors, eight worker replacements and clean process shutdown. This checks
 the per-request cancellation handle lifecycle under load; it is not a release
-performance comparison. [Exact load artifact](validation/http-load-linux-cancellation-2026-09-06.json).
+performance comparison. [Exact load artifact](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-load-linux-cancellation-2026-09-06.json).
 Logs: `/tmp/pox-http-cancel-final-tests.log` and
 `/tmp/pox-http-cancel-final-clippy.log`.
 
@@ -601,7 +601,7 @@ PHP modes pass verified TLS, forwarding spoof rejection, binary body forwarding,
 HTTP/2 frontend to HTTP/1.1 backend, management-listener separation, forced process
 loss producing 502, proxy recovery after backend restart and active TLS request
 drain on SIGTERM. Exact provenance is in the
-[deployment result](validation/http-caddy-linux-2026-09-06.json); the operational
+[deployment result](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-caddy-linux-2026-09-06.json); the operational
 instructions and scope are in the [deployment guide](http-server-deployment.md).
 
 The process-loss test uses SIGKILL while PHP is busy and restarts Pox explicitly
@@ -653,7 +653,7 @@ Final local validation passes: 108 workspace tests (50 HTTP, 12 runtime modes),
 Clippy, native build/smoke/buffer checks and both repository patch checks. Five
 output regressions also pass the focused Memcheck address/allocation check with
 zero definite leaks, within the explicitly documented limits. See
-[the output evidence](validation/http-native-output-linux-2026-09-06.md).
+[the output evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-native-output-linux-2026-09-06.md).
 At this pass, HTTP streaming was still incomplete. The twentieth pass below
 adds bounded Hyper body integration and framing/cancellation tests.
 
@@ -691,12 +691,12 @@ the scheduled Linux workflow includes this workload, but has not run remotely.
 
 Validation: the rebuilt PHP 8.5.9 ZTS runtime passes the complete 114-test suite
 (including 56 HTTP socket tests), and workspace/all-target Clippy with runtime
-integration and warnings denied passes. The [flushed load evidence](validation/http-load-linux-streaming-2026-09-06.json)
+integration and warnings denied passes. The [flushed load evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-load-linux-streaming-2026-09-06.json)
 records 10,000 successful requests per mode with 32 clients, eight PHP threads,
 4-KiB bodies and exit-zero shutdown. Standard RSS growth was 2.2 MiB and worker
 RSS growth was 4.5 MiB, with eight worker replacements. This is a short debug-build
 regression workload, not release performance or multi-hour stability evidence.
-The [Caddy streaming evidence](validation/http-caddy-streaming-linux-2026-09-06.json)
+The [Caddy streaming evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-caddy-streaming-linux-2026-09-06.json)
 records all nine deployment checks passing in both modes, including early flush
 through verified TLS, and exact executable/runtime hashes.
 
@@ -721,7 +721,7 @@ modes pass forced SIGKILL -> in-flight 502 -> automatic systemd restart -> new P
 and PHP/TLS recovery. Exactly one restart is observed. `systemctl stop` drains an
 active TLS request and leaves the unit inactive beyond its restart interval. The
 harness records the identities/counter/state and cleans up its temporary units.
-See [the recorded evidence](validation/http-caddy-systemd-linux-2026-09-06.json).
+See [the recorded evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-caddy-systemd-linux-2026-09-06.json).
 
 This closes the local automatic-supervisor recovery check for process loss. It
 does not establish native-extension crash behavior, dedicated-account system
@@ -745,9 +745,9 @@ body rather than successful termination. Both standard and worker modes recover
 through automatic systemd restart, with two successive faults yielding two
 replacements and restored PHP readiness/responses. Graceful service stop and all
 previous TLS/proxy checks still pass. A separate run exercises the harness-managed
-restart path as well. See [systemd evidence](validation/http-native-crash-linux-2026-09-06.json),
-[direct evidence](validation/http-native-crash-direct-linux-2026-09-06.json) and
-[fixture build provenance](validation/http-native-fault-build-linux-2026-09-06.json).
+restart path as well. See [systemd evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-native-crash-linux-2026-09-06.json),
+[direct evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-native-crash-direct-linux-2026-09-06.json) and
+[fixture build provenance](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-native-fault-build-linux-2026-09-06.json).
 
 This establishes Linux/PHP 8.5.9 ZTS process-level recovery from a synchronous
 extension memory fault, including committed responses. It does not claim that
@@ -767,13 +767,13 @@ deadline against ten million requests correctly returns a failed report and exit
 status 1. Short duration/count workloads pass in both modes. A 65-second flushed
 worker run completed 165,606 verified responses, 828 replacements, 3.4 MiB RSS
 growth and exit-zero shutdown, with two resource-history points. See
-[driver validation](validation/http-duration-driver-linux-2026-09-06.json).
+[driver validation](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-duration-driver-linux-2026-09-06.json).
 
 The current Rust implementation was rebuilt with the configured release profile
 (opt-level 3, LTO, one codegen unit, panic abort), completing in 4m14s. A copy of
 that executable, the matching native library and the load driver was made read-only
 in an isolated temporary directory so future builds cannot overwrite an active
-workload. The [start record](validation/http-release-soak-start-linux-2026-09-06.json)
+workload. The [start record](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-release-soak-start-linux-2026-09-06.json)
 contains exact hashes, commands and live process observations.
 
 Two-hour flushed workloads have started concurrently for standard and worker
@@ -804,7 +804,7 @@ The complete 15-check suite passes in both PHP modes against the configured LTO
 release binary, including real extension SIGSEGV before headers and after flush,
 automatic process replacement, stream abortion, verified TLS, forwarding identity,
 HTTP/2 frontend, management separation and graceful stop. See
-[release deployment evidence](validation/http-release-crash-loop-linux-2026-09-06.json).
+[release deployment evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-release-crash-loop-linux-2026-09-06.json).
 All temporary service units were removed. No production service was installed,
 and no Rust/native implementation changed in this pass.
 
@@ -831,7 +831,7 @@ download alone cannot prove an existing extracted source tree was replaced.
 
 A fresh PHP 8.4.25 ZTS SDK build is active in its own directory with the runtime's
 full extension/library selection and four build jobs. See the
-[build start record](validation/http-php84-build-start-linux-2026-09-06.json).
+[build start record](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-php84-build-start-linux-2026-09-06.json).
 This is preparation, not PHP 8.4 test evidence: SDK completion, native ABI linking,
 HTTP/runtime tests and deployment tests remain to run. The independent two-hour
 PHP 8.5 release workloads continue from their immutable snapshots.
@@ -856,7 +856,7 @@ The metric state is retained independently of the server/executor lifetime.
 Two socket tests cover both PHP modes: pending/successful/fatal streams, static
 length completion, HEAD and disconnect accounting. The full runtime-enabled suite
 passes 116 tests, and workspace/all-target Clippy with warnings denied passes.
-See [validation evidence](validation/http-body-metrics-linux-2026-09-06.json).
+See [validation evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-body-metrics-linux-2026-09-06.json).
 
 PHP 8.4 SDK compilation and both two-hour workloads remain active. The workload
 snapshots predate this observability addition, so their eventual results validate
@@ -876,7 +876,7 @@ bytes and requires an error outcome with no completion count.
 
 All three body-metric socket tests pass; the full suite passes 117 tests and
 workspace/all-target Clippy passes with warnings denied. See
-[regression evidence](validation/http-premature-body-linux-2026-09-06.json).
+[regression evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-premature-body-linux-2026-09-06.json).
 PHP 8.4 dependency compilation and the two-hour release workloads continue;
 the latter still exercise snapshots predating the metric changes. No completion
 claim is made for either ongoing validation effort.
@@ -888,8 +888,8 @@ The isolated PHP 8.4.25 ZTS SDK completed with the configured extension set.
 The native ABI library compiled against it and passed the native smoke checks;
 all 117 runtime-enabled Rust/socket tests pass on that library. The 15-check TLS,
 native-crash, streaming and supervisor suite also passes in both modes. See
-[PHP 8.4 runtime evidence](validation/http-php84-runtime-linux-2026-09-06.json) and
-[deployment evidence](validation/http-php84-deployment-linux-2026-09-06.json).
+[PHP 8.4 runtime evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-php84-runtime-linux-2026-09-06.json) and
+[deployment evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-php84-deployment-linux-2026-09-06.json).
 The host lacks static libstdc++.a, so this local build uses the documented dynamic
 C++ opt-in. It is not a published or release-qualified native artifact.
 
@@ -901,7 +901,7 @@ shutdown. It retains the Symfony Kernel in worker mode, using Symfony's own
 per-main-request reset, with recycling configured at 20 requests. Dependencies
 include Symfony 8.1.0, Doctrine ORM 3.6.7 and Twig 3.27.1. See the
 [framework guide](http-server-framework-testing.md) and
-[application evidence](validation/http-symfony-linux-2026-09-06.json).
+[application evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-symfony-linux-2026-09-06.json).
 
 The source app lacked generated Runtime/importmap artifacts. Preparation now
 regenerates the Runtime loader from its installed template and runs normal Symfony
@@ -921,7 +921,7 @@ The unchanged real-application harness passes all seven checks in standard and
 worker modes on PHP 8.4.25 ZTS as well as 8.5.9. This verifies database-backed
 rendering, RSS, CSRF generation, fixture login/session continuity, anonymous
 isolation and concurrent locale requests against the same Symfony 8.1 dependency
-manifests. See [PHP 8.4 application evidence](validation/http-symfony-php84-linux-2026-09-06.json).
+manifests. See [PHP 8.4 application evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-symfony-php84-linux-2026-09-06.json).
 No host/server implementation was changed for this result.
 
 A release-profile rebuild with the latest body metrics is active. The existing
@@ -934,8 +934,8 @@ progress substitutes for completed artifact/shutdown validation.
 
 The release rebuild with body metrics completed in 4m28s. It passes 100,000 flushed
 requests per PHP mode and all 15 TLS/native-crash/supervisor checks per mode. See
-[current release load](validation/http-current-release-load-linux-2026-09-06.json)
-and [deployment evidence](validation/http-current-release-deployment-linux-2026-09-06.json).
+[current release load](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-current-release-load-linux-2026-09-06.json)
+and [deployment evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-current-release-deployment-linux-2026-09-06.json).
 The two-hour workloads remain separate, active runs on their earlier snapshots.
 
 Slowly rising worker RSS prompted a controlled recycling comparison. At 30,000
@@ -955,7 +955,7 @@ forced a static PIE executable, but PHP is loaded as a separate shared library.
 The checksum-verified published v0.0.2 musl executable, paired with the matching
 checksum-verified PHP 8.5.9-r2 musl runtime, fails with `Dynamic loading not
 supported`. This failure occurs before PHP initialization; passing `--help` did
-not exercise the required loader. See [reproduction evidence](validation/http-musl-loader-linux-2026-09-06.json).
+not exercise the required loader. See [reproduction evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-musl-loader-linux-2026-09-06.json).
 
 The musl Dockerfile now disables static CRT linkage and runs all three real
 shared-library ABI-loader tests before building the release binary. Those tests
@@ -982,7 +982,7 @@ and refuses a missing/empty notice directory.
 A real local PHP 8.4 runtime archive contains all 24 SDK-collected notice files,
 verified byte-for-byte, and the archived library hash matches runtime.json. A
 missing-directory test exits 1 without creating an archive. See
-[packaging evidence](validation/http-runtime-license-packaging-linux-2026-09-06.json).
+[packaging evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-runtime-license-packaging-linux-2026-09-06.json).
 This validates preservation of the SDK payload, not an independent legal review.
 No archive was published.
 
@@ -1004,9 +1004,9 @@ All nine direct Caddy/TLS checks pass in standard and worker modes, including
 verified certificates, HTTP/2 frontend, forwarding protection, early flush,
 forced-process-loss recovery and graceful drain. These container tests use the
 harness restart path, not systemd or the native SIGSEGV extension fixture. See
-[musl runtime evidence](validation/http-musl-runtime-linux-2026-09-06.json),
-[deployment evidence](validation/http-musl-deployment-linux-2026-09-06.json) and
-[native archive evidence](validation/http-musl-native-linux-2026-09-06.json).
+[musl runtime evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-musl-runtime-linux-2026-09-06.json),
+[deployment evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-musl-deployment-linux-2026-09-06.json) and
+[native archive evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-musl-native-linux-2026-09-06.json).
 
 The completed runtime was repackaged with the corrected notice script; its archive
 contains 24 SDK notices and a matching library digest. This replaces the earlier
@@ -1025,14 +1025,14 @@ shared PHP extensions against the runtime's private symbol interface.
 
 All 11 direct Caddy/TLS checks pass in both modes on musl and glibc with the
 corrected fixture, including crashes before headers and after a committed flush.
-See [musl evidence](validation/http-musl-portable-fault-linux-2026-09-06.json) and
-[glibc evidence](validation/http-glibc-portable-fault-linux-2026-09-06.json).
+See [musl evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-musl-portable-fault-linux-2026-09-06.json) and
+[glibc evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-glibc-portable-fault-linux-2026-09-06.json).
 These runs use harness-managed restarts, not systemd.
 
 The musl release also passes 100,000 flushed requests per mode with 32 clients,
 eight workers and recycling every 1,000 requests. Both runs meet the harness's
 RSS/file-descriptor bounds and exit cleanly. See
-[load evidence](validation/http-musl-load-linux-2026-09-06.json).
+[load evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-musl-load-linux-2026-09-06.json).
 Concurrent glibc soaks share the host, so these timings are not isolated
 performance comparisons. The two-hour glibc runs are still pending; the other
 unverified platform, deployment and publication gates remain open.
@@ -1048,7 +1048,7 @@ application files.
 
 The targeted test passes on Linux x86_64 glibc PHP 8.4.25 and 8.5.9, and Alpine
 musl PHP 8.5.9. CLI all-target runtime-feature Clippy and both repository patch
-checks pass. See [evidence](validation/http-repeated-reload-linux-2026-09-06.json).
+checks pass. See [evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-repeated-reload-linux-2026-09-06.json).
 The full suite was not rerun for this test-only addition. Simultaneous shutdown
 and reload, arbitrary reload storms and non-Linux execution remain unverified.
 The original two-hour glibc workloads are still live with no reported failures.
@@ -1064,7 +1064,7 @@ shutdown_deadline_exceeded, without claiming a completed drain.
 Both cases pass on Linux x86_64 glibc PHP 8.4.25 and 8.5.9. The full current PHP
 8.5.9 runtime suite passes all 119 tests, including both newly added lifecycle
 tests. CLI all-target runtime-feature Clippy and patch checks pass. See
-[evidence](validation/http-shutdown-reload-linux-2026-09-06.json). This overlap
+[evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-shutdown-reload-linux-2026-09-06.json). This overlap
 test has not run on musl or other platforms. The two-hour workloads remain
 active; their final resource bounds and clean shutdown are not yet verified.
 
@@ -1079,7 +1079,7 @@ after the corpus.
 
 All 13 cases pass in both standard and worker modes on glibc PHP 8.4.25 and 8.5.9.
 CLI all-target runtime-feature Clippy and patch checks pass. See
-[evidence](validation/http-framing-corpus-linux-2026-09-06.json). This is targeted
+[evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-framing-corpus-linux-2026-09-06.json). This is targeted
 coverage, not exhaustive protocol fuzzing or a new full-suite result.
 
 Local platform inspection found no registered aarch64 interpreter or available
@@ -1096,7 +1096,7 @@ With this extension configured, both server modes exit 254 within 40 ms and log
 the named module startup failure; repeated loopback probes observe no reachable
 HTTP listener. After removing the bad extension setting, fresh processes serve
 a valid request and exit cleanly on SIGTERM. See
-[evidence](validation/http-startup-failure-linux-2026-09-06.json).
+[evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-startup-failure-linux-2026-09-06.json).
 
 This local glibc PHP 8.5.9 result establishes process-failure behavior and recovery
 after configuration correction. PHP terminates during this module failure, so
@@ -1113,14 +1113,14 @@ all Linux capabilities dropped, no-new-privileges, a read-only root filesystem
 and read-only artifact/script mounts. Only /tmp is writable, using a bounded
 128-MiB tmpfs for the isolated application, certificates and Caddy state. This
 includes native faults, interrupted committed TLS responses, recovery and drain.
-See [container evidence](validation/http-unprivileged-container-linux-2026-09-06.json).
+See [container evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-unprivileged-container-linux-2026-09-06.json).
 It does not establish host system-service account permissions or boot behavior.
 
 The startup-failure probe is now checked in as scripts/test-http-startup-failure.py,
 with bounded subprocess cleanup, artifact hashes, both server modes and a fresh
 process recovery check. Matching startup-failure fixtures built against PHP
 8.4.25 and 8.5.9 both pass this script locally. See
-[repeatable evidence](validation/http-startup-repeatable-linux-2026-09-06.json).
+[repeatable evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-startup-repeatable-linux-2026-09-06.json).
 This retains the earlier limit: extension MINIT failure terminates PHP, so it
 does not prove safe retry following a returned partial-initialization failure.
 
@@ -1128,10 +1128,10 @@ does not prove safe retry following a returned partial-initialization failure.
 
 The complete current musl runtime-enabled suite passes all 120 tests, including
 repeated reloads, shutdown/reload overlap and malformed framing with pipelined
-follow-up isolation. See [suite evidence](validation/http-musl-current-suite-linux-2026-09-06.json).
+follow-up isolation. See [suite evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-musl-current-suite-linux-2026-09-06.json).
 The startup-failure harness also passes both modes under the unprivileged,
 read-only musl container restrictions, using a matching SDK-built fixture; see
-[startup evidence](validation/http-musl-startup-recovery-linux-2026-09-06.json).
+[startup evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-musl-startup-recovery-linux-2026-09-06.json).
 
 The [current readiness summary](http-server-readiness.md) consolidates evidence
 by platform and behavior without accumulating historical test totals. It makes
@@ -1151,7 +1151,7 @@ The corrected path creates a real archive with a matching checksum, exactly the
 expected binary/README/LICENSE payload, original binary digest and mode 0755.
 The extracted executable starts in a fresh Alpine container with libgcc. The
 release workflow passes actionlint. See
-[packaging evidence](validation/http-musl-release-packaging-linux-2026-09-06.json).
+[packaging evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-musl-release-packaging-linux-2026-09-06.json).
 This is local execution of the packaging path, not a remote CI run or publication.
 
 ## Forty-second hardening pass: loader checks across release builders
@@ -1179,7 +1179,7 @@ An isolated copy of the current native sources, source-download cache and SPC
 executable is now building PHP 8.5.9 in the Bookworm release Dockerfile, with four
 jobs. The original local native libraries and running soak snapshots are intact.
 The glibc CLI release build also remains active. See
-[baseline evidence](validation/http-local-glibc-baseline-linux-2026-09-06.json).
+[baseline evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-local-glibc-baseline-linux-2026-09-06.json).
 Neither release-container build has completed, so no new portability claim is
 made. Earlier local glibc results retain their original host-only scope.
 
@@ -1191,7 +1191,7 @@ requires glibc symbols through 2.30 and starts in an unmodified minimal Bullseye
 container. Its dependencies include liblzma and libgcc plus glibc libraries.
 
 On the development host, the exported binary also executes PHP 8.5.9 using the
-existing native runtime. See [CLI evidence](validation/http-glibc-release-cli-linux-2026-09-06.json).
+existing native runtime. See [CLI evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-glibc-release-cli-linux-2026-09-06.json).
 The Bookworm native runtime build remains active; that artifact and the complete
 release pair still need validation. No host-runtime compatibility result is
 reinterpreted as Bookworm compatibility, and nothing has been published.
@@ -1203,12 +1203,12 @@ links only libm/libc plus the loader; the dynamic C++ escape hatch was not used.
 C smoke and response-allocation tests pass. The Bullseye CLI plus this runtime
 executes PHP 8.5.9 ZTS in a minimal Bookworm container. The runtime archive has a
 matching manifest/library digest and all 24 SDK notices verified byte-for-byte.
-See [native artifact evidence](validation/http-glibc-release-native-linux-2026-09-06.json).
+See [native artifact evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-glibc-release-native-linux-2026-09-06.json).
 
 All nine direct Caddy/TLS checks pass in both modes using this release pair inside
 the Bookworm builder, including forwarding protection, early flush, process loss
 and harness restart, and graceful drain. See
-[deployment evidence](validation/http-glibc-release-pair-deployment-linux-2026-09-06.json).
+[deployment evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-glibc-release-pair-deployment-linux-2026-09-06.json).
 This run does not include the native-fault fixture or systemd, and full regression
 and load refresh against the new runtime remain pending. Earlier host-built
 libraries and the still-running sustained snapshots were not replaced.
@@ -1221,17 +1221,17 @@ flushed requests per mode inside Bookworm, with 32 clients and eight workers.
 Standard/worker elapsed times were 23.805/24.021 seconds, RSS growth was
 2,482,176/3,772,416 bytes, descriptor bounds passed and shutdown exited 0.
 The shared host also runs the original soaks; these are not isolated throughput
-comparisons. See [suite](validation/http-bookworm-native-suite-linux-2026-09-06.json)
-and [load](validation/http-bookworm-release-load-linux-2026-09-06.json) evidence.
+comparisons. See [suite](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-bookworm-native-suite-linux-2026-09-06.json)
+and [load](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-bookworm-release-load-linux-2026-09-06.json) evidence.
 
 A matching SDK-built crash fixture passes all 11 checks per mode in an
 unprivileged read-only Bookworm container. The same release artifacts also pass
 all 15 checks per mode under the host user systemd manager, including native
 crash recovery, committed TLS response interruption, restart limiting and reset.
 The startup-failure fixture passes both modes in Bookworm. See
-[native faults](validation/http-bookworm-native-fault-linux-2026-09-06.json),
-[systemd](validation/http-bookworm-systemd-linux-2026-09-06.json) and
-[startup](validation/http-bookworm-startup-linux-2026-09-06.json).
+[native faults](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-bookworm-native-fault-linux-2026-09-06.json),
+[systemd](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-bookworm-systemd-linux-2026-09-06.json) and
+[startup](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-bookworm-startup-linux-2026-09-06.json).
 
 These results close the local release-pair refresh identified in pass 45. The
 original two-hour runs still use their recorded older immutable snapshots;
@@ -1255,7 +1255,7 @@ All responses were 200, with no recorded contract errors. Both native servers
 and harnesses exited 0. Shutdown took 0.412/0.453 seconds. Standard RSS grew
 3,371,008 bytes; worker RSS grew 34,271,232 bytes, both within the configured
 64-MiB bound. Both ended with 11 descriptors. Worker mode recorded 30,845
-replacements. See [final evidence](validation/http-two-hour-soak-linux-2026-09-06.json).
+replacements. See [final evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-two-hour-soak-linux-2026-09-06.json).
 
 The binary, runtime and harness snapshot hashes were reverified against the start
 record and both final reports. This completes the previously pending sustained
@@ -1298,7 +1298,7 @@ The complete staged patch then passed.
 is verified in progress at the recorded Pox commit. Its five jobs cover Linux
 x86_64 PHP 8.4/8.5, Linux aarch64 PHP 8.5, Darwin x86_64 PHP 8.4 and Darwin
 aarch64 PHP 8.5, each building the pinned native source. See
-[start record](validation/http-candidate-ci-start-2026-09-06.json). Execution has
+[start record](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-candidate-ci-start-2026-09-06.json). Execution has
 started, but no job result or platform success is claimed yet.
 
 ## Fifty-first hardening pass: live musl candidate CI
@@ -1314,7 +1314,7 @@ The workflow passes actionlint, embedded Python parsing and local Alpine shell
 capability checks. Pox review commit 367965a adds this path.
 [Run 34062300114](https://github.com/shyim/pox/actions/runs/34062300114) is verified
 active at the matching commit and pinned native SHA. The original five-job run
-continues independently. See [start record](validation/http-musl-candidate-ci-start-2026-09-06.json).
+continues independently. See [start record](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-musl-candidate-ci-start-2026-09-06.json).
 No completed remote test result is claimed yet.
 
 ## Fifty-second hardening pass: candidate dependency download authentication
@@ -1330,7 +1330,7 @@ Pox review commit 49a66ca contains the correction and passes actionlint/staged
 checks. [Run 34062409646](https://github.com/shyim/pox/actions/runs/34062409646) is
 verified active at that commit with the same native source SHA. The earlier
 five-job run remains active without a reported failure. See
-[start record](validation/http-musl-candidate-auth-start-2026-09-06.json).
+[start record](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-musl-candidate-auth-start-2026-09-06.json).
 The corrected job results remain pending.
 
 ## Fifty-third hardening pass: full authenticated candidate run
@@ -1346,7 +1346,7 @@ correction. A full run of the corrected workflow is now dispatched at commit
 in progress with seven jobs. The authenticated musl-only run is also still
 building without a reported failure. Earlier in-progress jobs were not restarted
 because of observation timeouts. See
-[start record](validation/http-full-candidate-ci-start-2026-09-06.json).
+[start record](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-full-candidate-ci-start-2026-09-06.json).
 Remote platform success remains unproven until the actual test jobs finish.
 
 ## Fifty-fourth hardening pass: remote recycling test and optional runtime version
@@ -1363,7 +1363,7 @@ A local invocation without POX_PHP_RUNTIME also reproduced a startup panic from
 indexing absent PHP configuration in a server-only pox.toml. Version selection now
 uses optional lookup, with regression cases for empty, server-only, INI-only and
 explicit-version configurations. The full local suite passed 121 tests against
-the Bookworm PHP 8.5.9 library. See [validation record](validation/http-ci-recovery-fixes-2026-09-06.json).
+the Bookworm PHP 8.5.9 library. See [validation record](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-ci-recovery-fixes-2026-09-06.json).
 
 Both authenticated musl-only jobs progressed beyond native compilation into the
 Rust integration stage, establishing that the earlier dependency-download failure
@@ -1371,7 +1371,7 @@ was cleared in those jobs. Remote test outcomes remain pending.
 
 The initial ARM musl job completed successfully: 120 tests and four 5,000-request
 load checks (buffered/flushed, standard/worker), with no errors and clean shutdowns.
-The overall run failed on the separate x86_64 download job. See [ARM musl evidence](validation/http-ci-musl-arm-linux-2026-09-06.json).
+The overall run failed on the separate x86_64 download job. See [ARM musl evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-ci-musl-arm-linux-2026-09-06.json).
 The latest Pox commit 3cfef6d95bd1af1009879872064e087d765bb73d is dispatched in
 [run 34063032366](https://github.com/shyim/pox/actions/runs/34063032366), using the
 same native commit, to validate the optional-version fix and readiness-synchronized
@@ -1388,7 +1388,7 @@ resource-load harness do not run on Darwin.
 
 These results validate Pox 49a66ca and native 10c8b5d, preceding the optional
 version fix and readiness synchronization. The latest run 34063032366 is live
-on all seven jobs. See [platform evidence](validation/http-ci-authenticated-platforms-2026-09-06.json).
+on all seven jobs. See [platform evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-ci-authenticated-platforms-2026-09-06.json).
 
 ## Fifty-sixth hardening pass: shutdown coverage and platform timer policy
 
@@ -1414,7 +1414,7 @@ checks both HTTP modes' platform-specific configured values.
 The rebuilt local native library passed its smoke test and all 122 Rust/runtime
 tests. The no-per-thread-timer branch passed strict C syntax validation using a
 forced include that undefines the feature macro. This does not substitute for
-Darwin execution. See [timer validation](validation/http-platform-timer-fix-2026-09-06.json).
+Darwin execution. See [timer validation](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-platform-timer-fix-2026-09-06.json).
 
 ## Fifty-seventh hardening pass: glibc platform evidence
 
@@ -1422,7 +1422,7 @@ The original x86_64 glibc jobs completed successfully for PHP 8.4.25 and 8.5.9.
 The authenticated ARM glibc PHP 8.5.9 job also passed. Each job ran 120 tests
 and four 5,000-request load checks with no errors and clean exits. These jobs
 use native 10c8b5d and predate the latest fixes; their overall runs contain
-other failed jobs. See [glibc evidence](validation/http-ci-glibc-platforms-2026-09-06.json).
+other failed jobs. See [glibc evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-ci-glibc-platforms-2026-09-06.json).
 
 The latest pair, Pox 1efbd9946d8523bd314b795da1d56e9887fbc7c9 and native
 28da99e2b32667845ea9aafdfa631fa0f65d3829, is running in all seven jobs of
@@ -1440,13 +1440,13 @@ The corrected native 28da99e and Pox 1efbd99 pair passed all 119 applicable
 tests on Darwin ARM PHP 8.5.9 in job 101568023580. The platform INI test,
 shutdown-cancellation test and reusable-thread isolation test all passed.
 Darwin Intel and the remaining matrix jobs are still pending. See
-[corrected ARM evidence](validation/http-ci-timer-darwin-arm-2026-09-06.json).
+[corrected ARM evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-ci-timer-darwin-arm-2026-09-06.json).
 
 ## Fifty-ninth hardening pass: corrected musl validation
 
 Both musl jobs in current run 34063460630 passed 122 tests and four 5,000-request
 load checks each, with no errors and clean exits. These validate Pox 1efbd99 and
-native 28da99e. See [corrected musl evidence](validation/http-ci-timer-musl-linux-2026-09-06.json).
+native 28da99e. See [corrected musl evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-ci-timer-musl-linux-2026-09-06.json).
 The readiness summary now separates the current candidate from historical
 results instead of retaining obsolete in-progress status paragraphs.
 
@@ -1456,8 +1456,8 @@ Darwin Intel PHP 8.4.25 passed all 119 applicable tests on the corrected native
 28da99e/Pox 1efbd99 pair, including the previously failing reusable-thread
 isolation check, timer-policy regression and shutdown-cancellation test.
 Glibc ARM passed 122 tests and four 5,000-request load checks with no errors
-and clean exits. See [Intel evidence](validation/http-ci-timer-darwin-intel-2026-09-06.json)
-and [glibc ARM evidence](validation/http-ci-timer-glibc-arm-2026-09-06.json).
+and clean exits. See [Intel evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-ci-timer-darwin-intel-2026-09-06.json)
+and [glibc ARM evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-ci-timer-glibc-arm-2026-09-06.json).
 The two x86_64 glibc jobs remain live; full-matrix validation is still pending.
 
 ## Sixty-first hardening pass: full corrected candidate matrix passed
@@ -1467,8 +1467,8 @@ native 28da99e. The final x86_64 glibc PHP 8.4.25 and 8.5.9 jobs each passed
 122 tests and four 5,000-request load checks. Across the matrix, five Linux
 jobs passed 122 tests each and two Darwin jobs passed 119 applicable tests each:
 848 test executions and 100,000 Linux load requests, with no load errors and
-clean shutdowns. See [full matrix evidence](validation/http-ci-full-matrix-2026-09-06.json)
-and [final glibc evidence](validation/http-ci-timer-glibc-x86-2026-09-06.json).
+clean shutdowns. See [full matrix evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-ci-full-matrix-2026-09-06.json)
+and [final glibc evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-ci-timer-glibc-x86-2026-09-06.json).
 This is source-candidate validation, not release publication or deployment.
 
 ## Sixty-second hardening pass: generated framing validation
@@ -1480,7 +1480,7 @@ exactly one 400 response, connection termination and no PHP side effect. It
 then requires a fresh healthy request and checks its exact side effect.
 Both modes passed 1,024 generated cases each against the current local native
 28da99e build, with clean shutdowns. This broadens the fixed corpus without
-claiming exhaustive fuzzing. See [generated framing evidence](validation/http-generated-framing-linux-2026-09-06.json).
+claiming exhaustive fuzzing. See [generated framing evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-generated-framing-linux-2026-09-06.json).
 
 Strict workspace/all-target Clippy with runtime-integration enabled also passed
 on the current source. The final completion audit is reconciling the original

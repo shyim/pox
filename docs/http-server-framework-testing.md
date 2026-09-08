@@ -30,7 +30,7 @@ configured at 20 requests. The fixture account is the demo's public `jane_admin`
 account; credentials and session cookies are not written to the result artifact.
 The copied application uses its own SQLite database and a null mail transport.
 
-The [recorded Linux result](validation/http-symfony-linux-2026-09-06.json) passes
+The [recorded Linux result](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-symfony-linux-2026-09-06.json) passes
 all seven checks per mode on PHP 8.5.9 ZTS, Symfony FrameworkBundle/HttpKernel
 8.1.0, Doctrine ORM 3.6.7 and Twig 3.27.1. It includes binary/runtime and dependency
 manifest hashes. This is an HTTP integration test, not a browser UI test or a
@@ -38,8 +38,8 @@ claim that every Symfony bundle or deployment configuration is supported.
 
 
 The same seven checks also pass in both modes on PHP 8.4.25 ZTS; see the
-[PHP 8.4 application result](validation/http-symfony-php84-linux-2026-09-06.json).
+[PHP 8.4 application result](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-symfony-php84-linux-2026-09-06.json).
 It uses the same dependency manifests and HTTP harness. The locally built PHP 8.4
 runtime links dynamic libstdc++ and is validation-only, as described in the
-[PHP 8.4 runtime evidence](validation/http-php84-runtime-linux-2026-09-06.json).
+[PHP 8.4 runtime evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-php84-runtime-linux-2026-09-06.json).
 These short application runs do not measure long-term framework memory growth.

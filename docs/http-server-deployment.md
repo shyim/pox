@@ -115,7 +115,7 @@ restart recovery, graceful drain and early PHP flush delivery in both PHP modes.
 and multi-host networking are outside this test. Without `--systemd`, the harness
 restarts the backend itself.
 
-The [recorded result](validation/http-caddy-streaming-linux-2026-09-06.json) includes exact
+The [recorded result](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-caddy-streaming-linux-2026-09-06.json) includes exact
 binary, runtime and Caddy hashes. The Caddy 2.11.4 Linux amd64 archive was checked
 against its published SHA512 checksum and GitHub release SHA256 digest
 `527fbf917c39189a1e3b31d34fa955601680b2d5c8055d2a87b8b9588dec7bb9`
@@ -124,7 +124,7 @@ before execution.
 On Linux with an available systemd user manager and `XDG_RUNTIME_DIR`, append
 `--systemd` to the command above to exercise automatic restart and service stop.
 The harness creates uniquely named temporary units and removes them on exit.
-The [systemd result](validation/http-caddy-systemd-linux-2026-09-06.json) records
+The [systemd result](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-caddy-systemd-linux-2026-09-06.json) records
 11 passing checks per PHP mode, original/replacement PIDs, automatic restart
 counts, stopped service state and service-template hash. This local run used
 systemd 261 and the same debug binary/native runtime as the streaming validation.
@@ -157,9 +157,9 @@ request. The final service stop still drains successfully. Core dumps are disabl
 in the test service. The extension is never installed into the runtime or a
 persistent application configuration.
 
-The [native-crash evidence](validation/http-native-crash-linux-2026-09-06.json)
+The [native-crash evidence](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-native-crash-linux-2026-09-06.json)
 records all 13 checks passing in both modes with PHP 8.5.9 ZTS, including two
-automatic restarts per mode. [Build provenance](validation/http-native-fault-build-linux-2026-09-06.json)
+automatic restarts per mode. [Build provenance](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-native-fault-build-linux-2026-09-06.json)
 records the fixture source/library hashes, compiler and matching PHP SDK version.
 A native memory fault terminates the whole Pox process, including its other PHP
 threads; worker replacement inside the process cannot contain it. This controlled
@@ -184,7 +184,7 @@ as the checked-in service, without shortening its settings for the test. The
 operator reset changes only the uniquely named temporary test unit. It does not
 reset other services or install a persistent service.
 
-The [release-profile result](validation/http-release-crash-loop-linux-2026-09-06.json)
+The [release-profile result](https://github.com/shyim/pox/blob/2c777c4f0fadb8da15f16498dcc3331945a6a6fb/docs/validation/http-release-crash-loop-linux-2026-09-06.json)
 records 15 checks passing in each PHP mode, combining native memory faults,
 streamed-response failure, TLS/proxy semantics, graceful stop, restart limiting
 and operator recovery. It uses the same release binary/runtime snapshots as the

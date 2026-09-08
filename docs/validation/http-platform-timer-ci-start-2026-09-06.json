@@ -1,9 +1,0 @@
-{
-  "run": {
-    "databaseId": 34063460630,
-    "headSha": "1efbd9946d8523bd314b795da1d56e9887fbc7c9",
-    "status": "in_progress",
-    "url": "https://github.com/shyim/pox/actions/runs/34063460630"
-  },
-  "native_commit": "28da99e2b32667845ea9aafdfa631fa0f65d3829"
-}
