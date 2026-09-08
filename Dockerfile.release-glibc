@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /work
 COPY . .
 ARG TARGET
+RUN cargo test -p pox-embed --test loader --locked --target "${TARGET}"
 RUN cargo build --release --locked --target "${TARGET}"
 RUN strip "target/${TARGET}/release/pox"
 RUN cp "target/${TARGET}/release/pox" /pox

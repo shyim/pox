@@ -597,7 +597,11 @@ fn read_version(path: &Path) -> Result<Option<String>> {
         return Ok(None);
     }
     let document = fs::read_to_string(path)?.parse::<DocumentMut>()?;
-    Ok(document["php"]["version"].as_str().map(ToString::to_string))
+    Ok(document
+        .get("php")
+        .and_then(|php| php.get("version"))
+        .and_then(|version| version.as_str())
+        .map(ToString::to_string))
 }
 
 fn write_version(path: &Path, version: &str) -> Result<()> {
@@ -619,6 +623,22 @@ fn write_version(path: &Path, version: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_php_version_does_not_panic_for_server_only_configuration() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pox.toml");
+        for config in [
+            "",
+            "[server]\nport = 8080\n",
+            "[php.ini]\nmemory_limit = '256M'\n",
+        ] {
+            fs::write(&path, config).unwrap();
+            assert_eq!(read_version(&path).unwrap(), None);
+        }
+        fs::write(&path, "[php]\nversion = '8.5'\n").unwrap();
+        assert_eq!(read_version(&path).unwrap().as_deref(), Some("8.5"));
+    }
 
     #[test]
     fn version_selectors_are_component_based() {

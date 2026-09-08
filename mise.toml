@@ -24,5 +24,5 @@ runtime_library="$PWD/../pox-runtime/build/libpox_php.so"
 if [ "$(uname -s)" = Darwin ]; then
   runtime_library="$PWD/../pox-runtime/build/libpox_php.dylib"
 fi
-POX_PHP_RUNTIME="${runtime_library}" cargo test --workspace --all-targets --features pox-embed/runtime-integration --locked -- --test-threads=1
+POX_PHP_RUNTIME="${runtime_library}" cargo test --workspace --all-targets --features pox-cli/runtime-integration --locked -- --test-threads=1
 '''

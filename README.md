@@ -97,7 +97,10 @@ global selection in `$XDG_CONFIG_HOME/pox/config.toml`.
 Runtime artifacts are published by
 [`shyim/pox-runtime`](https://github.com/shyim/pox-runtime) for macOS and Linux
 glibc/musl on x86_64 and aarch64. A Pox binary and runtime must use the same OS
-and architecture; Linux builds must also use the same libc.
+and architecture; Linux builds must also use the same libc. Musl builds use the
+musl dynamic loader so they can load PHP runtimes; run them on a musl distribution
+such as Alpine (with `libgcc` installed), rather than treating them as fully
+static executables.
 
 ## PHP CLI
 
@@ -138,7 +141,7 @@ router = "index.php"
 
 CLI `-d` values override `pox.toml` INI settings.
 
-## Development server
+## HTTP server
 
 ```bash
 pox server
@@ -146,6 +149,12 @@ pox server --port 8080 --document-root public
 pox server --document-root public public/index.php
 pox server --worker worker.php --workers 4 --watch '**/*.php'
 ```
+
+The HTTP server uses bounded connection/request admission, transport deadlines,
+parallel persistent workers, and graceful signal handling. Explicit CLI server
+options override `pox.toml`; unset values default to `127.0.0.1:8000` and the
+current directory. See [server configuration](docs/http-server.md) for limits and
+[the production-readiness review](docs/http-server-review.md) for remaining work.
 
 Worker scripts use the `pox_handle_request()` function supplied by the runtime:
 

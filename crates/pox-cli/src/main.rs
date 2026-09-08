@@ -1,22 +1,17 @@
 mod config;
 mod package_manager;
 mod runtime_manager;
+mod server;
+mod server_path;
 
 use config::PoxConfig;
 use runtime_manager::RuntimeManager;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use globset::{Glob, GlobSetBuilder};
-use notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebouncedEvent};
-use pox_embed::{HttpRequest, PhpRuntime};
+use pox_embed::PhpRuntime;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use tiny_http::{Header, Response, Server, StatusCode};
 
 #[derive(Parser, Debug)]
 #[command(name = "pox")]
@@ -71,19 +66,19 @@ enum Commands {
         command: PhpCommands,
     },
 
-    /// Start a PHP development server
+    /// Start the PHP HTTP server
     Server {
         /// Address to listen on
-        #[arg(long, default_value = "127.0.0.1")]
-        host: String,
+        #[arg(long)]
+        host: Option<String>,
 
         /// Port to listen on
-        #[arg(short, long, default_value = "8000")]
-        port: u16,
+        #[arg(short, long)]
+        port: Option<u16>,
 
         /// Document root directory
-        #[arg(short = 't', long, default_value = ".")]
-        document_root: PathBuf,
+        #[arg(short = 't', long)]
+        document_root: Option<PathBuf>,
 
         /// Router script (optional, like php -S router.php)
         #[arg(value_name = "ROUTER")]
@@ -93,7 +88,7 @@ enum Commands {
         #[arg(short = 'w', long)]
         worker: Option<PathBuf>,
 
-        /// Number of worker threads (default: number of CPU cores)
+        /// PHP execution threads in standard or worker mode (default: number of CPU cores)
         #[arg(long, default_value = "0")]
         workers: usize,
 
@@ -225,462 +220,6 @@ fn build_ini_entries(config: Option<&PoxConfig>, defines: &[String]) -> Option<S
     Some(entries.join("\n") + "\n")
 }
 
-#[allow(clippy::too_many_arguments)]
-fn run_server(
-    php: &PhpRuntime,
-    host: &str,
-    port: u16,
-    document_root: &Path,
-    router: Option<&Path>,
-    worker: Option<&Path>,
-    num_workers: usize,
-    watch_patterns: Vec<String>,
-    config: Option<&PoxConfig>,
-) -> Result<i32> {
-    // Apply INI entries from config for server mode
-    let ini_entries = build_ini_entries(config, &[]);
-    if ini_entries.is_some() {
-        php.set_ini_entries(ini_entries.as_deref())?;
-    }
-
-    let addr = format!("{}:{}", host, port);
-    let server =
-        Server::http(&addr).map_err(|e| anyhow::anyhow!("Failed to start server: {}", e))?;
-
-    let document_root = document_root
-        .canonicalize()
-        .unwrap_or_else(|_| document_root.to_path_buf());
-
-    println!(
-        "PHP {} Development Server started at http://{}",
-        php.version(),
-        addr
-    );
-    println!("Document root is {}", document_root.display());
-    if let Some(router) = router {
-        println!("Router script is {}", router.display());
-    }
-    if let Some(worker_script) = worker {
-        let num_workers = if num_workers == 0 {
-            std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4)
-        } else {
-            num_workers
-        };
-        println!(
-            "Worker script is {} ({} workers)",
-            worker_script.display(),
-            num_workers
-        );
-        if !watch_patterns.is_empty() {
-            println!("Watching for file changes: {:?}", watch_patterns);
-        }
-        return run_worker_server(
-            php,
-            server,
-            host,
-            port,
-            &document_root,
-            worker_script,
-            num_workers,
-            watch_patterns,
-        );
-    }
-    println!("Press Ctrl-C to quit.");
-
-    // Initialize PHP web runtime
-    let php = php
-        .web()
-        .map_err(|e| anyhow::anyhow!("Failed to initialize PHP: {}", e))?;
-
-    for mut request in server.incoming_requests() {
-        let method = request.method().to_string();
-        let url = request.url().to_string();
-        let (path, query_string) = parse_url(&url);
-
-        // Try to serve static file first
-        if let Some((content, content_type)) = get_static_file_content(&document_root, &path) {
-            serve_static_file(request, content, &content_type, &method, &url);
-            continue;
-        }
-
-        // Determine the script to execute
-        let script_path = resolve_script_path(&document_root, &path, router);
-
-        // Check if the file exists
-        if !script_path.exists() || !script_path.is_file() {
-            send_error_response(
-                request,
-                404,
-                "The requested URL was not found on this server.",
-                &method,
-                &url,
-            );
-            continue;
-        }
-
-        let (headers, body, remote_addr, remote_port) = extract_request_metadata(&mut request);
-        let php_request = build_php_request(
-            method.clone(),
-            url.clone(),
-            query_string,
-            headers,
-            body,
-            &document_root,
-            &script_path,
-            host,
-            port,
-            remote_addr,
-            remote_port,
-        );
-
-        let result = php.execute(php_request);
-        send_php_response(request, result, &method, &url);
-    }
-
-    Ok(0)
-}
-
-/// Resolve the PHP script path for a request
-fn resolve_script_path(document_root: &Path, url_path: &str, router: Option<&Path>) -> PathBuf {
-    if let Some(router) = router {
-        return router.to_path_buf();
-    }
-
-    let mut file_path = document_root.to_path_buf();
-    let url_path = url_path.trim_start_matches('/');
-    if url_path.is_empty() {
-        file_path.push("index.php");
-    } else {
-        file_path.push(url_path);
-    }
-
-    // If it's a directory, look for index.php
-    if file_path.is_dir() {
-        file_path.push("index.php");
-    }
-
-    // If the file doesn't exist, fall back to index.php (front controller pattern)
-    if !file_path.exists() || !file_path.is_file() {
-        let index_php = document_root.join("index.php");
-        if index_php.exists() && index_php.is_file() {
-            return index_php;
-        }
-    }
-
-    file_path
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_worker_server(
-    php: &PhpRuntime,
-    server: Server,
-    host: &str,
-    port: u16,
-    document_root: &Path,
-    worker_script: &Path,
-    num_workers: usize,
-    watch_patterns: Vec<String>,
-) -> Result<i32> {
-    let document_root = document_root.to_path_buf();
-    let worker_script = worker_script
-        .canonicalize()
-        .map_err(|e| anyhow::anyhow!("Worker script not found: {}", e))?;
-    let host = host.to_string();
-
-    println!("Press Ctrl-C to quit.");
-
-    // Initialize the worker pool (wrapped in Mutex for restart capability)
-    let worker_pool = Arc::new(Mutex::new(
-        php.workers(
-            worker_script.to_string_lossy().as_ref(),
-            document_root.to_string_lossy().as_ref(),
-            num_workers,
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to initialize PHP worker pool: {}", e))?,
-    ));
-
-    // Set up file watcher if patterns are provided
-    let restart_flag = Arc::new(AtomicBool::new(false));
-    let _watcher = if !watch_patterns.is_empty() {
-        // Build glob set from patterns
-        let mut glob_builder = GlobSetBuilder::new();
-        for pattern in &watch_patterns {
-            match Glob::new(pattern) {
-                Ok(glob) => {
-                    glob_builder.add(glob);
-                }
-                Err(e) => eprintln!("Invalid glob pattern '{}': {}", pattern, e),
-            }
-        }
-        let glob_set = glob_builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build glob set: {}", e))?;
-
-        // Create debounced watcher
-        let restart_flag_clone = restart_flag.clone();
-        let (tx, rx) = std::sync::mpsc::channel();
-
-        let mut debouncer = new_debouncer(
-            Duration::from_millis(150),
-            None,
-            move |result: std::result::Result<Vec<DebouncedEvent>, Vec<notify::Error>>| {
-                if let Ok(events) = result {
-                    let _ = tx.send(events);
-                }
-            },
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to create file watcher: {}", e))?;
-
-        // Watch the document root recursively
-        debouncer
-            .watch(&document_root, RecursiveMode::Recursive)
-            .map_err(|e| anyhow::anyhow!("Failed to watch directory: {}", e))?;
-
-        // Spawn thread to handle file change events
-        let worker_pool_clone = worker_pool.clone();
-        let doc_root_clone = document_root.clone();
-        std::thread::spawn(move || {
-            while let Ok(events) = rx.recv() {
-                // Check if any changed file matches our patterns
-                let mut should_restart = false;
-                for event in events {
-                    for path in &event.paths {
-                        // Get relative path from document root
-                        if let Ok(rel_path) = path.strip_prefix(&doc_root_clone) {
-                            let rel_path_str = rel_path.to_string_lossy();
-                            if glob_set.is_match(&*rel_path_str) || glob_set.is_match(path) {
-                                eprintln!("File changed: {}", path.display());
-                                should_restart = true;
-                            }
-                        } else if glob_set.is_match(path) {
-                            eprintln!("File changed: {}", path.display());
-                            should_restart = true;
-                        }
-                    }
-                }
-
-                if should_restart {
-                    restart_flag_clone.store(true, Ordering::SeqCst);
-                    // Restart workers
-                    if let Ok(mut pool) = worker_pool_clone.lock() {
-                        pool.restart();
-                    }
-                    restart_flag_clone.store(false, Ordering::SeqCst);
-                }
-            }
-        });
-
-        Some(debouncer)
-    } else {
-        None
-    };
-
-    // Handle incoming requests
-    for mut request in server.incoming_requests() {
-        let method = request.method().to_string();
-        let url = request.url().to_string();
-        let (path, query_string) = parse_url(&url);
-
-        // Try to serve static files first
-        if let Some((content, content_type)) = get_static_file_content(&document_root, &path) {
-            serve_static_file(request, content, &content_type, &method, &url);
-            continue;
-        }
-
-        // Wait if workers are restarting
-        while restart_flag.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-
-        let (headers, body, remote_addr, remote_port) = extract_request_metadata(&mut request);
-        let php_request = build_php_request(
-            method.clone(),
-            url.clone(),
-            query_string,
-            headers,
-            body,
-            &document_root,
-            &worker_script,
-            &host,
-            port,
-            remote_addr,
-            remote_port,
-        );
-
-        // Execute through worker pool
-        let result = {
-            let pool = worker_pool.lock().unwrap_or_else(|e| e.into_inner());
-            pool.handle_request(php_request)
-        };
-
-        send_php_response(request, result, &method, &url);
-    }
-
-    Ok(0)
-}
-
-fn make_content_type_header(content_type: &str) -> Option<Header> {
-    Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).ok()
-}
-
-/// Parse URL into path and query string
-fn parse_url(url: &str) -> (String, String) {
-    if let Some(pos) = url.find('?') {
-        (url[..pos].to_string(), url[pos + 1..].to_string())
-    } else {
-        (url.to_string(), String::new())
-    }
-}
-
-/// Check if a static file can be served, returns Some(content) if so
-fn get_static_file_content(document_root: &Path, path: &str) -> Option<(Vec<u8>, String)> {
-    let static_path = document_root.join(path.trim_start_matches('/'));
-    if static_path.exists() && static_path.is_file() && !path.ends_with(".php") {
-        if let Ok(content) = std::fs::read(&static_path) {
-            let content_type = guess_content_type(&static_path);
-            return Some((content, content_type));
-        }
-    }
-    None
-}
-
-/// Serve a static file response
-fn serve_static_file(
-    request: tiny_http::Request,
-    content: Vec<u8>,
-    content_type: &str,
-    method: &str,
-    url: &str,
-) {
-    let mut response = Response::from_data(content);
-    if let Some(header) = make_content_type_header(content_type) {
-        response = response.with_header(header);
-    }
-    let _ = request.respond(response);
-    println!("{} {} - 200", method, url);
-}
-
-/// Extract request metadata from tiny_http::Request
-fn extract_request_metadata(
-    request: &mut tiny_http::Request,
-) -> (Vec<(String, String)>, Vec<u8>, String, u16) {
-    // Read request body
-    let mut body = Vec::new();
-    if let Err(e) = request.as_reader().read_to_end(&mut body) {
-        eprintln!("Failed to read request body: {}", e);
-    }
-
-    // Collect headers
-    let headers: Vec<(String, String)> = request
-        .headers()
-        .iter()
-        .map(|h| (h.field.to_string(), h.value.to_string()))
-        .collect();
-
-    // Get remote address
-    let remote_addr = request
-        .remote_addr()
-        .map(|a| a.ip().to_string())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
-    let remote_port = request.remote_addr().map(|a| a.port()).unwrap_or(0);
-
-    (headers, body, remote_addr, remote_port)
-}
-
-/// Build an HttpRequest for PHP
-#[allow(clippy::too_many_arguments)]
-fn build_php_request(
-    method: String,
-    url: String,
-    query_string: String,
-    headers: Vec<(String, String)>,
-    body: Vec<u8>,
-    document_root: &Path,
-    script_filename: &Path,
-    host: &str,
-    port: u16,
-    remote_addr: String,
-    remote_port: u16,
-) -> HttpRequest {
-    HttpRequest {
-        method,
-        uri: url,
-        query_string,
-        headers,
-        body,
-        document_root: document_root.to_string_lossy().to_string(),
-        script_filename: script_filename.to_string_lossy().to_string(),
-        server_name: host.to_string(),
-        server_port: port,
-        remote_addr,
-        remote_port,
-    }
-}
-
-/// Send a PHP response back to the client
-fn send_php_response(
-    request: tiny_http::Request,
-    result: std::result::Result<pox_embed::HttpResponse, pox_embed::PhpError>,
-    method: &str,
-    url: &str,
-) {
-    match result {
-        Ok(response) => {
-            let mut http_response =
-                Response::from_data(response.body).with_status_code(StatusCode(response.status));
-
-            for (key, value) in response.headers {
-                if let Ok(header) = Header::from_bytes(key.as_bytes(), value.as_bytes()) {
-                    http_response.add_header(header);
-                }
-            }
-
-            let status = response.status;
-            let _ = request.respond(http_response);
-            println!("{} {} - {}", method, url, status);
-        }
-        Err(e) => {
-            send_error_response(request, 500, &e.to_string(), method, url);
-        }
-    }
-}
-
-/// Send an error response
-fn send_error_response(
-    request: tiny_http::Request,
-    status_code: u16,
-    message: &str,
-    method: &str,
-    url: &str,
-) {
-    let title = match status_code {
-        404 => "404 Not Found",
-        500 => "500 Internal Server Error",
-        _ => "Error",
-    };
-    let heading = match status_code {
-        404 => "Not Found",
-        500 => "Internal Server Error",
-        _ => "Error",
-    };
-    let body = format!(
-        "<!DOCTYPE html><html><head><title>{}</title></head><body><h1>{}</h1><p>{}</p></body></html>",
-        title, heading, message
-    );
-    let mut response = Response::from_string(body).with_status_code(StatusCode(status_code));
-    if let Some(header) = make_content_type_header("text/html") {
-        response = response.with_header(header);
-    }
-    let _ = request.respond(response);
-    if message.is_empty() {
-        println!("{} {} - {}", method, url, status_code);
-    } else {
-        println!("{} {} - {} ({})", method, url, status_code, message);
-    }
-}
-
 fn guess_content_type(path: &Path) -> String {
     let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
@@ -732,15 +271,19 @@ fn run() -> Result<i32> {
                 watch,
             } => {
                 // Merge CLI args with config file settings (CLI takes precedence)
-                let effective_host = config
-                    .as_ref()
-                    .and_then(|c| c.server.host.clone())
-                    .unwrap_or(host);
-                let effective_port = config.as_ref().and_then(|c| c.server.port).unwrap_or(port);
-                let effective_doc_root = config
-                    .as_ref()
-                    .and_then(|c| c.server.document_root.as_ref().map(PathBuf::from))
-                    .unwrap_or(document_root);
+                let effective_host = host
+                    .or_else(|| config.as_ref().and_then(|c| c.server.host.clone()))
+                    .unwrap_or_else(|| "127.0.0.1".into());
+                let effective_port = port
+                    .or_else(|| config.as_ref().and_then(|c| c.server.port))
+                    .unwrap_or(8000);
+                let effective_doc_root = document_root
+                    .or_else(|| {
+                        config
+                            .as_ref()
+                            .and_then(|c| c.server.document_root.as_ref().map(PathBuf::from))
+                    })
+                    .unwrap_or_else(|| PathBuf::from("."));
                 let effective_router = router.or_else(|| {
                     config
                         .as_ref()
@@ -765,7 +308,7 @@ fn run() -> Result<i32> {
                     watch
                 };
 
-                return run_server(
+                return server::run(
                     &manager.load_selected()?,
                     &effective_host,
                     effective_port,

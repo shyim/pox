@@ -26,10 +26,16 @@ pub struct PhpConfig {
     pub ini: HashMap<String, String>,
 }
 
-/// Development server configuration
+/// HTTP server configuration
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct ServerConfig {
+    /// Optional independent health and metrics listener.
+    pub admin_address: Option<std::net::SocketAddr>,
+    /// Proxy CIDRs allowed to supply X-Forwarded-* metadata. Empty trusts nobody.
+    pub trusted_proxies: Vec<String>,
+    /// Transport and request resource bounds.
+    pub limits: crate::server::Limits,
     /// Host to bind to
     pub host: Option<String>,
 

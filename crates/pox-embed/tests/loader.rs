@@ -44,21 +44,56 @@ fn owns_web_responses_returned_through_the_abi() {
     let (_directory, path) = fake_runtime(runtime_target());
     let php = PhpRuntime::load(path).unwrap();
     let web = php.web().unwrap();
-    let response = web
-        .execute(HttpRequest {
-            method: "GET".into(),
-            uri: "/".into(),
-            query_string: String::new(),
-            headers: Vec::new(),
-            body: Vec::new(),
-            document_root: ".".into(),
-            script_filename: "index.php".into(),
-            server_name: "localhost".into(),
-            server_port: 80,
-            remote_addr: "127.0.0.1".into(),
-            remote_port: 1,
-        })
-        .unwrap();
+    let request = HttpRequest {
+        output: None,
+        cancellation: None,
+        secure: false,
+        protocol: pox_embed::HttpProtocol::Http11,
+        method: "GET".into(),
+        uri: "/".into(),
+        query_string: String::new(),
+        headers: Vec::new(),
+        body: Vec::new(),
+        document_root: ".".into(),
+        script_filename: "index.php".into(),
+        server_name: "localhost".into(),
+        server_port: 80,
+        remote_addr: "127.0.0.1".into(),
+        remote_port: 1,
+    };
+    assert!(!php.supports_response_limits());
+    assert!(!php.supports_response_output());
+    assert!(matches!(
+        php.cancellation(),
+        Err(pox_embed::PhpError::CancellationUnsupported)
+    ));
+    assert!(matches!(
+        web.parallel_executor(),
+        Err(pox_embed::PhpError::ParallelWebUnsupported)
+    ));
+    assert!(matches!(
+        web.execute_with_limits(
+            request.clone(),
+            pox_embed::ResponseLimits {
+                body_bytes: 1024,
+                header_bytes: 1024
+            }
+        ),
+        Err(pox_embed::PhpError::ResponseLimitsUnsupported)
+    ));
+    let mut legacy_protocol = request.clone();
+    legacy_protocol.protocol = pox_embed::HttpProtocol::Http10;
+    assert!(matches!(
+        web.execute(legacy_protocol),
+        Err(pox_embed::PhpError::HttpProtocolUnsupported)
+    ));
+    let mut secure_request = request.clone();
+    secure_request.secure = true;
+    assert!(matches!(
+        web.execute(secure_request),
+        Err(pox_embed::PhpError::RequestSchemeUnsupported)
+    ));
+    let response = web.execute(request).unwrap();
     assert_eq!(response.status, 204);
     assert!(response.body.is_empty());
 }

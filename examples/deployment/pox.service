@@ -1,0 +1,26 @@
+[Unit]
+Description=Pox PHP application server
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=pox
+Group=pox
+WorkingDirectory=/srv/pox/app
+Environment=POX_PHP_RUNTIME=/opt/pox/runtime/libpox_php.so
+ExecStart=/usr/local/bin/pox server
+Restart=on-failure
+RestartSec=2s
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=35s
+LimitCORE=0
+NoNewPrivileges=true
+UMask=0027
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
